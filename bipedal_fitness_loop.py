@@ -465,7 +465,8 @@ def main() -> int:
             end_x = None
 
         env.close()
-        hit_max_steps = bool(steps >= max_steps and not terminated and not truncated)
+        # `truncated` is how Gymnasium reports TimeLimit; treat that as "hit max steps".
+        hit_max_steps = bool(steps >= max_steps and not terminated)
         distance = None
         avg_speed = None
         if start_x is not None and end_x is not None:

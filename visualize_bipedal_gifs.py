@@ -187,7 +187,8 @@ def main() -> int:
                 "steps": steps,
                 "terminated": bool(terminated),
                 "truncated": bool(truncated),
-                "hit_max_steps": bool(steps >= max_steps and not terminated and not truncated),
+                # `truncated` is how Gymnasium reports TimeLimit; treat that as "hit max steps".
+                "hit_max_steps": bool(steps >= max_steps and not terminated),
                 "distance": distance,
                 "avg_speed": avg_speed,
             }
