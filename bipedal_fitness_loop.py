@@ -5,6 +5,7 @@ import ast
 import json
 import math
 import random
+import re
 import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -19,14 +20,127 @@ from call_ai_utils import call_ai
 
 @dataclass
 class Attempt:
+    iteration: int
     score_a: float
     score_b: float
     code: str
+    comment: str | None = None
 
 
 def _default_run_dir() -> Path:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return Path("runs") / f"bipedal_{ts}"
+
+def _load_run_meta(run_dir: Path) -> dict[str, Any] | None:
+    path = run_dir / "meta.json"
+    if not path.exists():
+        return None
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _load_attempt_history(run_dir: Path) -> list[Attempt]:
+    """
+    Reconstruct `history` from a prior run directory.
+    This uses `attempts.jsonl` as the source of truth for iteration order/scores,
+    and loads code from the recorded `code_path` (or `iter_XXX.py` fallback).
+    """
+    attempts_path = run_dir / "attempts.jsonl"
+    if not attempts_path.exists():
+        raise FileNotFoundError(f"Missing attempts file: {attempts_path}")
+
+    history: list[Attempt] = []
+    for line in attempts_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        it = rec.get("iteration")
+        if not isinstance(it, int):
+            continue
+        code_path = rec.get("code_path")
+        if isinstance(code_path, str) and code_path.endswith(".py"):
+            code_file = run_dir / code_path
+        else:
+            code_file = run_dir / f"iter_{it:03d}.py"
+        try:
+            code = code_file.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        score_a = rec.get("score_a")
+        score_b = rec.get("score_b")
+        try:
+            sa = float(score_a) if score_a is not None else float("-inf")
+        except Exception:
+            sa = float("-inf")
+        try:
+            sb = float(score_b) if score_b is not None else float("-inf")
+        except Exception:
+            sb = float("-inf")
+
+        comment = rec.get("comment")
+        comment = str(comment) if isinstance(comment, str) else None
+        history.append(Attempt(iteration=int(it), score_a=sa, score_b=sb, code=code, comment=comment))
+
+    history.sort(key=lambda a: a.iteration)
+    return history
+
+
+def _load_seen_programs(run_dir: Path) -> list[tuple[str, list[float], int, int]]:
+    """
+    Reconstruct `seen_programs` for minuscule-change warnings from `candidates.jsonl`.
+    Best-effort: skips malformed records.
+    """
+    path = run_dir / "candidates.jsonl"
+    if not path.exists():
+        return []
+    out: list[tuple[str, list[float], int, int]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        code = rec.get("code")
+        it = rec.get("iteration")
+        idx = rec.get("candidate_index")
+        if not isinstance(code, str) or not isinstance(it, int) or not isinstance(idx, int):
+            continue
+        try:
+            sig, nums = _code_signature_and_numbers(code)
+            out.append((sig, nums, int(it), int(idx)))
+        except Exception:
+            continue
+    return out
+
+
+def _max_existing_iter(run_dir: Path) -> int:
+    """
+    Determine the highest iteration index present in the run dir from iter_XXX.py files.
+    """
+    best = 0
+    for p in run_dir.glob("iter_*.py"):
+        m = re.match(r"^iter_(\d+)$", p.stem)
+        if not m:
+            continue
+        try:
+            best = max(best, int(m.group(1)))
+        except Exception:
+            continue
+    return best
 
 
 def _jsonable(obj: Any) -> Any:
@@ -70,6 +184,128 @@ def _format_history_all(history: list[Attempt]) -> str:
         lines.append(f"Attempt {i}: reward={a.reward:.4f}\n{snippet}\n")
     return "\n".join(lines)
 
+
+class _NumericNormalizer(ast.NodeTransformer):
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        if isinstance(node.value, (int, float)):
+            return ast.copy_location(ast.Constant(value=0), node)
+        return node
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
+        node = self.generic_visit(node)  # type: ignore[assignment]
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            if isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, (int, float)):
+                return ast.copy_location(ast.Constant(value=0), node)
+        return node
+
+
+class _NumericExtractor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.values: list[float] = []
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> None:
+        if isinstance(node.op, (ast.UAdd, ast.USub)) and isinstance(node.operand, ast.Constant):
+            if isinstance(node.operand.value, (int, float)):
+                v = float(node.operand.value)
+                if isinstance(node.op, ast.USub):
+                    v = -v
+                self.values.append(v)
+                return
+        self.generic_visit(node)
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if isinstance(node.value, (int, float)):
+            self.values.append(float(node.value))
+        # Don't recurse.
+
+
+def _code_signature_and_numbers(code: str) -> tuple[str, list[float]]:
+    tree = ast.parse(code)
+    extractor = _NumericExtractor()
+    extractor.visit(tree)
+    normalized = _NumericNormalizer().visit(tree)
+    ast.fix_missing_locations(normalized)
+    sig = ast.dump(normalized, include_attributes=False)
+    return sig, extractor.values
+
+
+def _miniscule_param_change_warning(
+    sig: str,
+    nums: list[float],
+    *,
+    seen: list[tuple[str, list[float], int, int]],
+) -> tuple[str | None, dict[str, Any] | None]:
+    """
+    If the structure (sig) matches a prior program and numeric constants changed only slightly,
+    return a warning message and metadata about the match.
+    """
+    if not nums:
+        return None, None
+
+    # Heuristics for "minor numeric tweaks".
+    max_rel_thresh = 0.05
+    mean_rel_thresh = 0.02
+    max_abs_thresh = 0.2
+    mean_abs_thresh = 0.05
+
+    best: tuple[float, float, int, int, float, float] | None = None  # (max_rel, mean_rel, step, idx, max_abs, mean_abs)
+    for prev_sig, prev_nums, prev_step, prev_idx in seen:
+        if prev_sig != sig:
+            continue
+        if len(prev_nums) != len(nums) or not prev_nums:
+            continue
+        rels: list[float] = []
+        abss: list[float] = []
+        for a, b in zip(prev_nums, nums):
+            d = abs(a - b)
+            abss.append(d)
+            denom = max(1e-6, abs(a), abs(b))
+            rel = d / denom
+            rels.append(rel)
+        max_rel = max(rels)
+        mean_rel = sum(rels) / len(rels)
+        max_abs = max(abss)
+        mean_abs = sum(abss) / len(abss)
+
+        # Identical program (or numerically identical constants).
+        if max_abs <= 1e-12:
+            return (
+                "WARNING: only miniscule paramter change detected, inefficient. more topological change required",
+                {"type": "identical", "similar_step": prev_step, "similar_candidate_index": prev_idx},
+            )
+
+        # "Miniscule" tweak heuristic.
+        if (
+            max_rel <= max_rel_thresh
+            and mean_rel <= mean_rel_thresh
+            and max_abs <= max_abs_thresh
+            and mean_abs <= mean_abs_thresh
+        ):
+            if best is None or (max_rel, mean_rel, max_abs, mean_abs) < (
+                best[0],
+                best[1],
+                best[4],
+                best[5],
+            ):
+                best = (max_rel, mean_rel, prev_step, prev_idx, max_abs, mean_abs)
+
+    if best is None:
+        return None, None
+
+    _max_rel, _mean_rel, prev_step, prev_idx, _max_abs, _mean_abs = best
+    warning = "WARNING: only miniscule paramter change detected, inefficient. more topological change required"
+    meta = {
+        "type": "minuscule_params",
+        "similar_step": prev_step,
+        "similar_candidate_index": prev_idx,
+        "max_rel": _max_rel,
+        "mean_rel": _mean_rel,
+        "max_abs": _max_abs,
+        "mean_abs": _mean_abs,
+    }
+    return warning, meta
+
+
 def _format_history_best_random_last(
     history: list[Attempt],
     *,
@@ -102,7 +338,11 @@ def _format_history_best_random_last(
             continue
         seen.add(key)
         snippet = "\n".join(a.code.strip().splitlines()[:12])
-        out.append(f"{label}: score_a={a.score_a:.6f} score_b={a.score_b:.6f}\n{snippet}\n")
+        header = f"{label}: score_a={a.score_a:.6f} score_b={a.score_b:.6f}"
+        if a.comment:
+            out.append(f"{header}\n{a.comment}\n{snippet}\n")
+        else:
+            out.append(f"{header}\n{snippet}\n")
         if len(out) >= 6:
             break
     return "\n".join(out)
@@ -115,7 +355,7 @@ def build_bipedal_prompt(*, history: list[Attempt], seed: int) -> str:
         "def main(obs: list[float]) -> list[float]:\n"
         "\n"
         "Contract:\n"
-        "- `obs` is a list of floats.\n"
+        "- `obs` is a list of 8 floats.\n"
         "- Return a list of 4 floats.\n"
         "- The evaluator will clip floats to [-1, 1].\n"
         "- Imports: you may `import math` only.\n"
@@ -319,60 +559,144 @@ def evaluate_policy(
 
 
 def main() -> None:
+    DEFAULT_ENV_ID = "BipedalWalker-v3"
+    DEFAULT_SEEDS = [0, 1, 2]
+    DEFAULT_MAX_STEPS = 6000
+    DEFAULT_TIMEOUT = 180.0
+    DEFAULT_CONCURRENT = 1
+    DEFAULT_TEMPERATURE = 1.0
+
     p = argparse.ArgumentParser()
-    p.add_argument("--iterations", type=int, default=20)
-    p.add_argument("--concurrent", type=int, default=1, help="Number of candidate programs per iteration.")
-    p.add_argument("--temperature", type=float, default=1.0)
-    p.add_argument("--env-id", default="BipedalWalker-v3")
-    p.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
-    p.add_argument("--max-steps", type=int, default=6000)
-    p.add_argument("--timeout", type=float, default=180.0)
+    p.add_argument(
+        "--checkpoint-path",
+        "--checkpoint_path",
+        type=Path,
+        default=None,
+        help="Resume an existing run dir (e.g. runs/bipedal_20251221T121844Z).",
+    )
+    p.add_argument("--iterations", type=int, default=20, help="Additional iterations to run.")
+    p.add_argument(
+        "--concurrent",
+        type=int,
+        default=None,
+        help="Number of candidate programs per iteration (defaults to checkpoint meta.json or 1).",
+    )
+    p.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Model temperature (defaults to checkpoint meta.json or 1.0).",
+    )
+    p.add_argument("--env-id", default=None, help=f"Gym env id (defaults to checkpoint meta.json or {DEFAULT_ENV_ID}).")
+    p.add_argument("--seeds", type=int, nargs="+", default=None, help="Eval seeds (defaults to checkpoint meta.json).")
+    p.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help=f"Episode cap (defaults to checkpoint meta.json or {DEFAULT_MAX_STEPS}).",
+    )
+    p.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help=f"Per-eval timeout seconds (defaults to checkpoint meta.json or {DEFAULT_TIMEOUT}).",
+    )
     args = p.parse_args()
 
-    if args.concurrent < 1:
+    if args.iterations < 1:
+        raise SystemExit("`--iterations` must be >= 1")
+
+    run_dir: Path
+    run_meta: dict[str, Any] = {}
+    if args.checkpoint_path is not None:
+        run_dir = args.checkpoint_path.expanduser().resolve()
+        if not run_dir.exists() or not run_dir.is_dir():
+            raise SystemExit(f"`--checkpoint-path` must be an existing run directory: {run_dir}")
+        run_meta = _load_run_meta(run_dir) or {}
+    else:
+        run_dir = _default_run_dir()
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+    def _arg_or_meta(name: str, default: Any) -> Any:
+        val = getattr(args, name)
+        if val is not None:
+            return val
+        mv = run_meta.get(name)
+        return mv if mv is not None else default
+
+    concurrent = int(_arg_or_meta("concurrent", DEFAULT_CONCURRENT))
+    temperature = float(_arg_or_meta("temperature", DEFAULT_TEMPERATURE))
+    env_id = str(_arg_or_meta("env_id", DEFAULT_ENV_ID))
+
+    seeds_val = args.seeds if args.seeds is not None else run_meta.get("seeds")
+    if isinstance(seeds_val, list) and all(isinstance(x, int) for x in seeds_val):
+        seeds = list(seeds_val)
+    else:
+        seeds = list(DEFAULT_SEEDS)
+
+    max_steps_val = _arg_or_meta("max_steps", DEFAULT_MAX_STEPS)
+    timeout_val = args.timeout if args.timeout is not None else run_meta.get("timeout_s", DEFAULT_TIMEOUT)
+    max_steps = int(max_steps_val) if isinstance(max_steps_val, int) else int(DEFAULT_MAX_STEPS)
+    timeout_s = float(timeout_val) if isinstance(timeout_val, (int, float)) else float(DEFAULT_TIMEOUT)
+
+    if concurrent < 1:
         raise SystemExit("`--concurrent` must be >= 1")
+    if max_steps < 1:
+        raise SystemExit("`--max-steps` must be >= 1")
+    if not math.isfinite(timeout_s) or timeout_s <= 0:
+        raise SystemExit("`--timeout` must be a positive number")
 
-    history: list[Attempt] = []
+    # Resume state if checkpoint provided.
+    if args.checkpoint_path is not None:
+        history = _load_attempt_history(run_dir)
+        seen_programs = _load_seen_programs(run_dir)
+        last_iter = max((a.iteration for a in history), default=0)
+        last_file_iter = _max_existing_iter(run_dir)
+        start_step = max(last_iter, last_file_iter) + 1
+    else:
+        history = []
+        seen_programs = []
+        start_step = 1
+
     iterations = args.iterations
-    env_id = args.env_id
-    seeds = list(args.seeds)
 
-    run_dir = _default_run_dir()
-    run_dir.mkdir(parents=True, exist_ok=True)
     attempts_path = run_dir / "attempts.jsonl"
     candidates_path = run_dir / "candidates.jsonl"
     meta_path = run_dir / "meta.json"
-    meta_path.write_text(
-        json.dumps(
-            {
-                "experiment": "bipedal_blackbox",
-                "env_id": env_id,
-                "iterations": iterations,
-                "seeds": seeds,
-                "max_steps": args.max_steps,
-                "timeout_s": args.timeout,
-                "concurrent": args.concurrent,
-                "temperature": args.temperature,
-                "candidates_path": candidates_path.name,
-                "spec": "def main(obs: list[float]) -> list[float]  # returns 4 floats in [-1,1]",
-                "scores": ["score_a", "score_b"],
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
 
-    for step in range(1, iterations + 1):
+    # Write meta only for brand-new runs; for checkpoints keep the existing meta.json as-is.
+    if args.checkpoint_path is None and not meta_path.exists():
+        meta_path.write_text(
+            json.dumps(
+                {
+                    "experiment": "bipedal_blackbox",
+                    "env_id": env_id,
+                    "iterations": iterations,
+                    "seeds": seeds,
+                    "max_steps": max_steps,
+                    "timeout_s": timeout_s,
+                    "concurrent": concurrent,
+                    "temperature": temperature,
+                    "candidates_path": candidates_path.name,
+                    "spec": "def main(obs: list[float]) -> list[float]  # returns 4 floats in [-1,1]",
+                    "scores": ["score_a", "score_b"],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    for step in range(start_step, start_step + iterations):
         prompts = [
             build_bipedal_prompt(history=history, seed=(step * 10_000 + i))
-            for i in range(args.concurrent)
+            for i in range(concurrent)
         ]
 
         def _one_prompt(p: str):
-            return call_ai(p, concurrent_calls=1, temperature=args.temperature)[0]
+            return call_ai(p, concurrent_calls=1, temperature=temperature)[0]
 
-        with ThreadPoolExecutor(max_workers=args.concurrent) as executor:
+        with ThreadPoolExecutor(max_workers=concurrent) as executor:
             futures = [executor.submit(_one_prompt, p) for p in prompts]
             responses = [f.result() for f in futures]
 
@@ -395,16 +719,20 @@ def main() -> None:
             avg_return: float | None = None
             avg_distance: float | None = None
             avg_speed: float | None = None
+            comment: str | None = None
+            similarity: dict[str, Any] | None = None
 
             try:
                 validate_sandboxed_code(code, allowed_import_roots={"math"})
                 _validate_main_exists(code)
+                sig, nums = _code_signature_and_numbers(code)
+                comment, similarity = _miniscule_param_change_warning(sig, nums, seen=seen_programs)
                 result = evaluate_policy(
                     code,
                     env_id=env_id,
                     seeds=seeds,
-                    max_steps=args.max_steps,
-                    timeout_s=args.timeout,
+                    max_steps=max_steps,
+                    timeout_s=timeout_s,
                 )
                 if not result.get("ok"):
                     error = str(result.get("error") or "eval_failed")
@@ -437,6 +765,8 @@ def main() -> None:
                 "episodes": episodes,
                 "step_errors": step_errors,
                 "error": error,
+                "comment": comment,
+                "similarity": similarity,
                 "prompt": prompt,
                 "response": _jsonable(response.raw),
                 "code": code,
@@ -458,7 +788,16 @@ def main() -> None:
                     "avg_return": avg_return,
                     "avg_distance": avg_distance,
                     "avg_speed": avg_speed,
+                    "comment": comment,
+                    "similarity": similarity,
                 }
+
+            # Track every candidate (not just the best) for similarity checks later.
+            try:
+                sig, nums = _code_signature_and_numbers(code)
+                seen_programs.append((sig, nums, step, idx))
+            except Exception:
+                pass
 
         if best_code is None:
             best_code = "def main(obs: list[float]) -> list[float]:\n    return [0.0, 0.0, 0.0, 0.0]\n"
@@ -468,9 +807,11 @@ def main() -> None:
 
         history.append(
             Attempt(
+                iteration=step,
                 score_a=best_score_a if math.isfinite(best_score_a) else -1e9,
                 score_b=best_score_b if math.isfinite(best_score_b) else -1e9,
                 code=best_code,
+                comment=(best_detail or {}).get("comment") if isinstance(best_detail, dict) else None,
             )
         )
 
@@ -480,7 +821,7 @@ def main() -> None:
             "score_a": best_score_a,
             "score_b": best_score_b,
             "code_path": f"iter_{step:03d}.py",
-            "concurrent": args.concurrent,
+            "concurrent": concurrent,
             **(best_detail or {}),
         }
         if isinstance(record.get("episodes"), list):

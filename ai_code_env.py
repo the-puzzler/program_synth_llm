@@ -12,6 +12,7 @@ from typing import Any
 
 
 _CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
+_JOINED_KEYWORD_RE = re.compile(r"(?i)(\d)(and|or|not|in|is)\b")
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,9 @@ def clean_generated_code(code: str) -> str:
     Keeps behavior minimal and predictable: only removes a single leading language tag line.
     """
     normalized = code.replace("\ufeff", "").strip()
+    # Fix a common tokenization artifact that can trigger `SyntaxWarning: invalid decimal literal`,
+    # e.g. `0and` / `1or` / `2in` (missing whitespace after a number).
+    normalized = _JOINED_KEYWORD_RE.sub(r"\1 \2", normalized)
     lines = normalized.splitlines()
 
     i = 0
