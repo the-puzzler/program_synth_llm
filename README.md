@@ -1,4 +1,4 @@
-Program Synthesis Loops
+# Program Synthesis Loops
 
 This repo runs simple black-box “program evolution” loops where an LLM proposes small Python programs and we score them in an environment.
 
@@ -40,6 +40,9 @@ Black-box experiment (XOR)
 
 - Iteratively asks the model for a classifier `main(x0: float, x1: float) -> int` and only returns a scalar reward (accuracy) plus history:
   - `uv run xor_fitness_loop.py`
+  - After a run, render one combined figure (`all_boundaries.png`) with subplots for every `iter_###.py`:
+  - Latest run: `uv run visualize_boundaries.py`
+  - Specific run: `uv run visualize_boundaries.py runs/xor_YYYYMMDDTHHMMSSZ`
 
 Black-box experiment (BipedalWalker)
 
@@ -58,8 +61,10 @@ NEAT-inspired experiment (BipedalWalker) (currently not effective/working)
   - Run: `uv run neat_bipedal_fitness_loop.py`
   - Resume: `uv run neat_bipedal_fitness_loop.py --checkpoint-path runs/neat_bipedal_YYYYMMDDTHHMMSSZ`
 
-Visualize decision boundaries
+## How It Works (Very Briefly)
 
-- After a run, render one combined figure (`all_boundaries.png`) with subplots for every `iter_###.py`:
-  - Latest run: `uv run visualize_boundaries.py`
-  - Specific run: `uv run visualize_boundaries.py runs/xor_YYYYMMDDTHHMMSSZ`
+- The LLM outputs a single Python function `main(...)` that defines an agent/program.
+- We run that code in a sandbox and score it (XOR accuracy, or Bipedal distance/speed).
+- We keep a history of attempts and feed a small slice back into the prompt to bias the next proposal.
+- In the NEAT-style variant, we keep a population, select survivors/elites, create new programs via mutation/crossover prompts, and use a simple AST-based distance to form species and apply fitness sharing.
+
