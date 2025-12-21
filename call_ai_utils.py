@@ -40,7 +40,7 @@ def call_ai(
     concurrent_calls: int = 1,
     temperature: float = 1.0,
     *,
-    model: str = "openai/gpt-oss-120b",
+    model: str = "moonshotai/kimi-k2-instruct-0905",
     system_prompt: str = "",
     max_completion_tokens: Optional[int] = 8192,
     top_p: Optional[float] = None,
@@ -60,7 +60,7 @@ def call_ai(
             temperature=temperature,
             max_completion_tokens=max_completion_tokens,
             top_p=top_p,
-            reasoning_effort=reasoning_effort,
+            #reasoning_effort=reasoning_effort,
             stream=False,
         )
         content = raw.choices[0].message.content or ""

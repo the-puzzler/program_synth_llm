@@ -14,6 +14,15 @@ Black-box experiment (XOR)
 - Iteratively asks the model for a classifier `main(x0: float, x1: float) -> int` and only returns a scalar reward (accuracy) plus history:
   - `uv run xor_fitness_loop.py`
 
+Black-box experiment (BipedalWalker)
+
+- Iteratively asks the model for a policy `main(obs: list[float]) -> list[float]` (4-dim action) and scores average episode return:
+  - Install env deps: `uv add "gymnasium[box2d]"` (or otherwise install Gymnasium + Box2D)
+  - Run: `uv run bipedal_fitness_loop.py`
+  - Render GIFs (per-iteration) after a run:
+    - `uv run visualize_bipedal_gifs.py` (defaults to latest `runs/bipedal_*`)
+    - Collage (sequential) GIF: `uv run visualize_bipedal_gifs.py --collage --collage-limit 16`
+
 Visualize decision boundaries
 
 - After a run, render one combined figure (`all_boundaries.png`) with subplots for every `iter_###.py`:
