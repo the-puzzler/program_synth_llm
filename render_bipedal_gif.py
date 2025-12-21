@@ -194,7 +194,10 @@ def main() -> None:
     if not raw:
         raise SystemExit("No code provided. Pass `--code-path`, or pipe code into stdin.")
     code = clean_generated_code(extract_python_code(raw))
-    validate_sandboxed_code(code, allowed_import_roots={"math"})
+    validate_sandboxed_code(
+        code,
+        allowed_import_roots={"math", "random", "itertools", "functools", "statistics"},
+    )
 
     out_path = args.out
     if out_path is None:

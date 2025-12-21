@@ -519,7 +519,10 @@ def _append_stats(
 
 
 def _validate_policy_code(code: str) -> None:
-    validate_sandboxed_code(code, allowed_import_roots={"math"})
+    validate_sandboxed_code(
+        code,
+        allowed_import_roots={"math", "random", "itertools", "functools", "statistics"},
+    )
     tree = ast.parse(code)
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == "main":

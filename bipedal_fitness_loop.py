@@ -725,7 +725,10 @@ def main() -> None:
             similarity: dict[str, Any] | None = None
 
             try:
-                validate_sandboxed_code(code, allowed_import_roots={"math"})
+                validate_sandboxed_code(
+                    code,
+                    allowed_import_roots={"math", "random", "itertools", "functools", "statistics"},
+                )
                 _validate_main_exists(code)
                 sig, nums = _code_signature_and_numbers(code)
                 comment, similarity = _miniscule_param_change_warning(sig, nums, seen=seen_programs)

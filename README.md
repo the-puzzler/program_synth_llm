@@ -39,7 +39,7 @@ Quickstart
 - Install deps (once per machine):
   - `uv sync`
 - Set API key:
-  - `export GROQ_API_KEY="..."` 
+  - `export OPENROUTER_API_KEY="..."` (or put it in `.env`)
 
 Black-box experiment (XOR)
 
@@ -65,6 +65,12 @@ NEAT-inspired experiment (BipedalWalker) (currently not effective/working)
 - A population-based loop with selection, crossover, and speciation (fitness sharing):
   - Run: `uv run neat_bipedal_fitness_loop.py`
   - Resume: `uv run neat_bipedal_fitness_loop.py --checkpoint-path runs/neat_bipedal_YYYYMMDDTHHMMSSZ`
+
+Black-box experiment (Atari Pong)
+
+- Iteratively asks the model for a policy `main(obs: list[float]) -> int` and scores average episode return:
+  - Install env deps: `uv add "gymnasium[atari,accept-rom-license]"`
+  - Run: `uv run pong_fitness_loop.py`
 
 ## How It Works (Very Briefly)
 

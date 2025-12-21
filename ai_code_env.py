@@ -85,17 +85,91 @@ def clean_generated_code(code: str) -> str:
 
     cleaned = "\n".join(lines).strip() + "\n"
 
-    # Always provide `math` to generated code (keep any `from __future__ import ...` at the top).
+    # Always provide a small set of safe stdlib imports to generated code.
+    # Also normalize away redundant plain `import <module>` statements (even inside functions),
+    # so candidates can't "change" their program by shuffling imports around.
+    desired_modules = ("math", "random", "itertools", "functools", "statistics")
+    desired_imports = [f"import {m}" for m in desired_modules]
+
+    try:
+        tree = ast.parse(cleaned)
+
+        class _StripRedundantImports(ast.NodeTransformer):
+            def visit_Import(self, node: ast.Import) -> ast.AST:
+                kept: list[ast.alias] = []
+                for a in node.names:
+                    root = a.name.split(".", 1)[0]
+                    # Only strip plain `import math` / `import itertools` etc (no alias),
+                    # since aliases introduce new names the code may rely on.
+                    if root in desired_modules and a.asname is None and a.name == root:
+                        continue
+                    kept.append(a)
+                if not kept:
+                    return None  # delete statement
+                node.names = kept
+                return node
+
+            def _ensure_body(self, body: list[ast.stmt]) -> list[ast.stmt]:
+                return body if body else [ast.Pass()]
+
+            def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+                node = self.generic_visit(node)  # type: ignore[assignment]
+                node.body = self._ensure_body(list(node.body))
+                return node
+
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
+                node = self.generic_visit(node)  # type: ignore[assignment]
+                node.body = self._ensure_body(list(node.body))
+                return node
+
+            def visit_If(self, node: ast.If) -> ast.AST:
+                node = self.generic_visit(node)  # type: ignore[assignment]
+                node.body = self._ensure_body(list(node.body))
+                node.orelse = self._ensure_body(list(node.orelse)) if node.orelse else []
+                return node
+
+            def visit_For(self, node: ast.For) -> ast.AST:
+                node = self.generic_visit(node)  # type: ignore[assignment]
+                node.body = self._ensure_body(list(node.body))
+                node.orelse = self._ensure_body(list(node.orelse)) if node.orelse else []
+                return node
+
+            def visit_While(self, node: ast.While) -> ast.AST:
+                node = self.generic_visit(node)  # type: ignore[assignment]
+                node.body = self._ensure_body(list(node.body))
+                node.orelse = self._ensure_body(list(node.orelse)) if node.orelse else []
+                return node
+
+            def visit_With(self, node: ast.With) -> ast.AST:
+                node = self.generic_visit(node)  # type: ignore[assignment]
+                node.body = self._ensure_body(list(node.body))
+                return node
+
+            def visit_Try(self, node: ast.Try) -> ast.AST:
+                node = self.generic_visit(node)  # type: ignore[assignment]
+                node.body = self._ensure_body(list(node.body))
+                node.orelse = self._ensure_body(list(node.orelse)) if node.orelse else []
+                node.finalbody = self._ensure_body(list(node.finalbody)) if node.finalbody else []
+                for h in node.handlers:
+                    h.body = self._ensure_body(list(h.body))
+                return node
+
+        tree = _StripRedundantImports().visit(tree)  # type: ignore[assignment]
+        ast.fix_missing_locations(tree)
+        cleaned = ast.unparse(tree).strip() + "\n"
+    except Exception:
+        pass
+
+    # Inject desired imports near the top (after any future imports).
     out_lines = cleaned.splitlines()
-    has_math_import = any(
-        ln.strip() == "import math" or ln.strip().startswith("import math,") or ln.strip().startswith("import math ")
-        for ln in out_lines
-    )
-    if not has_math_import:
+    existing = {ln.strip() for ln in out_lines}
+    missing = [imp for imp in desired_imports if imp not in existing]
+    if missing:
         insert_at = 0
         while insert_at < len(out_lines) and out_lines[insert_at].startswith("from __future__ import "):
             insert_at += 1
-        out_lines.insert(insert_at, "import math")
+        for imp in reversed(missing):
+            out_lines.insert(insert_at, imp)
         cleaned = "\n".join(out_lines).strip() + "\n"
 
     return cleaned
@@ -376,4 +450,3 @@ if __name__ == "__main__":
         if err:
             payload.setdefault("stderr", err)
         return payload
-

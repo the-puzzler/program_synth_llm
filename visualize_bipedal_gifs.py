@@ -503,7 +503,10 @@ def main() -> None:
     for it_path in iters:
         code = it_path.read_text(encoding="utf-8")
         try:
-            validate_sandboxed_code(code, allowed_import_roots={"math"})
+            validate_sandboxed_code(
+                code,
+                allowed_import_roots={"math", "random", "itertools", "functools", "statistics"},
+            )
         except Exception as e:
             print(json.dumps({"iter": it_path.name, "ok": False, "error": f"sandbox: {e}"}))
             continue

@@ -11,5 +11,5 @@ dependencies = [
     "matplotlib>=3.8.0",
     "groq>=1.0.0",
     "swig>=4.4.0",
-    "gymnasium[box2d]>=1.2.3",
+    "gymnasium[accept-rom-license,atari,box2d,mujoco]>=1.2.3",
 ]
