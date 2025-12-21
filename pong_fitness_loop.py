@@ -202,19 +202,35 @@ def _format_history_best_random_last(
         chosen.append((f"LAST_{i}", a))
 
     seen: set[int] = set()
+    seen_sigs: set[str] = set()
     out: list[str] = []
+    kept = 0
     for label, a in chosen:
         key = id(a)
         if key in seen:
             continue
         seen.add(key)
+        try:
+            sig, _nums = _code_signature_and_numbers(a.code)
+        except Exception:
+            sig = ""
+        if sig:
+            if sig in seen_sigs:
+                continue
+            seen_sigs.add(sig)
+        else:
+            text_key = f"code:{hash(a.code)}"
+            if text_key in seen_sigs:
+                continue
+            seen_sigs.add(text_key)
         snippet = "\n".join(a.code.strip().splitlines()[:16])
         header = f"{label}: score={a.score:.6f}"
         if a.comment:
             out.append(f"{header}\n{a.comment}\n{snippet}\n")
         else:
             out.append(f"{header}\n{snippet}\n")
-        if len(out) >= 6:
+        kept += 1
+        if kept >= 6:
             break
     return "\n".join(out)
 

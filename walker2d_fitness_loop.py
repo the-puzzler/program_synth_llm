@@ -292,19 +292,36 @@ def _format_history_best_random_last(history: list[Attempt], *, seed: int) -> st
         chosen.append((f"LAST_{i}", a))
 
     seen: set[int] = set()
+    seen_sigs: set[str] = set()
     out: list[str] = []
+    kept = 0
     for label, a in chosen:
         key = id(a)
         if key in seen:
             continue
         seen.add(key)
+        try:
+            sig, _nums = _code_signature_and_numbers(a.code)
+        except Exception:
+            sig = ""
+        if sig:
+            if sig in seen_sigs:
+                continue
+            seen_sigs.add(sig)
+        else:
+            # Fallback to exact-text de-dupe if parsing fails.
+            text_key = f"code:{hash(a.code)}"
+            if text_key in seen_sigs:
+                continue
+            seen_sigs.add(text_key)
         snippet = "\n".join(a.code.strip().splitlines()[:12])
         header = f"{label}: score_a={a.score_a:.6f} score_b={a.score_b:.6f}"
         if a.comment:
             out.append(f"{header}\n{a.comment}\n{snippet}\n")
         else:
             out.append(f"{header}\n{snippet}\n")
-        if len(out) >= 6:
+        kept += 1
+        if kept >= 6:
             break
     return "\n".join(out)
 
@@ -322,8 +339,8 @@ def build_walker2d_prompt(*, history: list[Attempt], seed: int) -> str:
         "- Allowed imports: `math`, `random`, `itertools`, `functools`, `statistics`.\n"
         "- Do not import anything else.\n"
         "- Do not read/write files, do not use network, do not print.\n"
-        #"Prioritize changes to the functional form over parameter-only tuning.\n" #dont knwo if it helps
-        "Search over a computation graph/control flow space." # testing this
+        "Prioritize changes to the functional form over parameter-only tuning.\n" #dont knwo if it helps
+        "Search over a computation graph/program control flow space." # testing this
         "\n"
         "Goal: maximize two scalar scores: `score_a` and `score_b`.\n"
         "Higher is better for both.\n"
