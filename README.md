@@ -39,7 +39,7 @@ Quickstart
 - Install deps (once per machine):
   - `uv sync`
 - Set API key:
-  - `export GROQ_API_KEY="..."` (or put it in `.env`)
+  - `export GROQ_API_KEY="..."` 
 
 Black-box experiment (XOR)
 
