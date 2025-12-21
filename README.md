@@ -72,6 +72,14 @@ Black-box experiment (Atari Pong)
   - Install env deps: `uv add "gymnasium[atari,accept-rom-license]"`
   - Run: `uv run pong_fitness_loop.py`
 
+Black-box experiment (MuJoCo Walker2d)
+
+- Iteratively asks the model for a policy `main(obs: list[float]) -> list[float]` (6-dim action) and scores it:
+  - Install env deps: `uv add "gymnasium[mujoco]"`
+  - Run: `uv run walker2d_fitness_loop.py`
+  - Render GIFs (per-iteration) after a run:
+    - `uv run visualize_walker2d_gifs.py` (defaults to latest `runs/walker2d_*`)
+
 ## How It Works (Very Briefly)
 
 - The LLM outputs a single Python function `main(...)` that defines an agent/program.
