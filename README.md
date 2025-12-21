@@ -36,15 +36,6 @@ def main(x0: float, x1: float) -> int:
 
 Quickstart
 
-- Set `GROQ_API_KEY` in your environment.
-- Generate code and run it:
-  - `uv run run_ai_codegen.py`
-
-What this does
-
-- Builds a "code-only" prompt requiring the model to output a single Python code block defining `main(...)`.
-- Extracts the code block, validates that `main` exists and has the right number of inputs, then runs it in a subprocess and returns JSON.
-
 Black-box experiment (XOR)
 
 - Iteratively asks the model for a classifier `main(x0: float, x1: float) -> int` and only returns a scalar reward (accuracy) plus history:
@@ -61,7 +52,7 @@ Black-box experiment (BipedalWalker)
   - Render a one-off GIF from a specific policy:
     - `uv run render_bipedal_gif.py --code-path policy.py`
 
-NEAT-inspired experiment (BipedalWalker)
+NEAT-inspired experiment (BipedalWalker) (currently not effective/working)
 
 - A population-based loop with selection, crossover, and speciation (fitness sharing):
   - Run: `uv run neat_bipedal_fitness_loop.py`
