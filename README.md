@@ -1,4 +1,4 @@
-# Program Synthesis Loops
+# Program Synthesis LLM
 
 This repo runs simple black-box “program evolution” loops where an LLM proposes small Python programs and we score them in an environment.
 
