@@ -1,3 +1,37 @@
+Program Synthesis Loops
+
+This repo runs simple black-box “program evolution” loops where an LLM proposes small Python programs and we score them in an environment.
+
+**Bipedal (best GIF + policy)**
+
+![best_biped.gif](best_biped.gif)
+
+`policy.py` (the policy used to render `best_biped.gif`):
+
+```python
+def main(obs: list[float]) -> list[float]:
+    import math
+    if len(obs) < 4:
+        obs = obs + [0.0] * (4 - len(obs))
+    a, b, c, d = obs[:4]
+    f1 = math.tanh(10*a + 8*c + 8.5*b*d + 7.9*a*b + 7.8*c*d)
+    f2 = math.tanh(8.5*b - 7.9*c + 8.8*d + 8.3*a*c + 7.9*c*d + 7.6*a*d)
+    f3 = math.tanh(7.9*a*c + 7.9*b*d + 7.8*a - 7.2*b + 8.4*c + 7.8*a*b + 8.1*c*d)
+    f4 = math.tanh(8.1*c*d - 7.2*a*b - 8.9*d + 7.5*b - 8*a*c)
+    out0 = math.tanh(f1 + 7.4*f2 + 8.5*f3 + 3.2*f4 + 8.5*a*d - 2.5*b*c)
+    out1 = math.tanh(8*f1 - 8.2*f2 + 8.8*f3 - 3.1*f4 + 2.5*d)
+    out2 = math.tanh(8.3*f1 * f3 - 8*f2 * f4 + 2.5*c - 2.5*a*d)
+    out3 = math.tanh(f1 - f2 + f3 - f4)
+    return [out0, out1, out2, out3]
+```
+
+**XOR (reference solution)**
+
+```python
+def main(x0: float, x1: float) -> int:
+    return 1 if (x0 > 0) != (x1 > 0) else 0
+```
+
 Quickstart
 
 - Set `GROQ_API_KEY` in your environment.
@@ -22,17 +56,17 @@ Black-box experiment (BipedalWalker)
   - Render GIFs (per-iteration) after a run:
     - `uv run visualize_bipedal_gifs.py` (defaults to latest `runs/bipedal_*`)
     - Collage (sequential) GIF: `uv run visualize_bipedal_gifs.py --collage --collage-limit 16`
+  - Render a one-off GIF from a specific policy:
+    - `uv run render_bipedal_gif.py --code-path policy.py`
+
+NEAT-inspired experiment (BipedalWalker)
+
+- A population-based loop with selection, crossover, and speciation (fitness sharing):
+  - Run: `uv run neat_bipedal_fitness_loop.py`
+  - Resume: `uv run neat_bipedal_fitness_loop.py --checkpoint-path runs/neat_bipedal_YYYYMMDDTHHMMSSZ`
 
 Visualize decision boundaries
 
 - After a run, render one combined figure (`all_boundaries.png`) with subplots for every `iter_###.py`:
   - Latest run: `uv run visualize_boundaries.py`
   - Specific run: `uv run visualize_boundaries.py runs/xor_YYYYMMDDTHHMMSSZ`
-
-Black-box experiment (Image Reconstruction)
-
-- Add an `image.jpeg` in the repo root, then run an LLM loop that learns `main(x: float, y: float) -> [r,g,b]` from a hidden dataset scored by MSE:
-  - `uv run image_recon_fitness_loop.py`
-  - Visualize all reconstructions in a run as a subplot collage:
-    - `uv run visualize_image_recon.py runs/image_YYYYMMDDTHHMMSSZ`
-    - Or latest run: `uv run visualize_image_recon.py`
