@@ -32,6 +32,8 @@ def main(x0: float, x1: float) -> int:
     return 1 if (x0 > 0) != (x1 > 0) else 0
 ```
 
+![XOR-boundries.png](XOR-boundries.png)
+
 Quickstart
 
 - Set `GROQ_API_KEY` in your environment.
