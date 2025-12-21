@@ -28,3 +28,11 @@ Visualize decision boundaries
 - After a run, render one combined figure (`all_boundaries.png`) with subplots for every `iter_###.py`:
   - Latest run: `uv run visualize_boundaries.py`
   - Specific run: `uv run visualize_boundaries.py runs/xor_YYYYMMDDTHHMMSSZ`
+
+Black-box experiment (Image Reconstruction)
+
+- Add an `image.jpeg` in the repo root, then run an LLM loop that learns `main(x: float, y: float) -> [r,g,b]` from a hidden dataset scored by MSE:
+  - `uv run image_recon_fitness_loop.py`
+  - Visualize all reconstructions in a run as a subplot collage:
+    - `uv run visualize_image_recon.py runs/image_YYYYMMDDTHHMMSSZ`
+    - Or latest run: `uv run visualize_image_recon.py`

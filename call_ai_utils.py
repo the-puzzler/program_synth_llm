@@ -40,7 +40,7 @@ def call_ai(
     concurrent_calls: int = 1,
     temperature: float = 1.0,
     *,
-    model: str = "moonshotai/kimi-k2-instruct-0905",
+    model: str = "moonshotai/kimi-k2-instruct-0905",#moonshotai/kimi-k2-instruct-0905, openai/gpt-oss-120b
     system_prompt: str = "",
     max_completion_tokens: Optional[int] = 8192,
     top_p: Optional[float] = None,
