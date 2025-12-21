@@ -83,14 +83,22 @@ def clean_generated_code(code: str) -> str:
         if first in {"py", "python"}:
             lines.pop(i)
 
-    return "\n".join(lines).strip() + "\n"
+    cleaned = "\n".join(lines).strip() + "\n"
 
+    # Always provide `math` to generated code (keep any `from __future__ import ...` at the top).
+    out_lines = cleaned.splitlines()
+    has_math_import = any(
+        ln.strip() == "import math" or ln.strip().startswith("import math,") or ln.strip().startswith("import math ")
+        for ln in out_lines
+    )
+    if not has_math_import:
+        insert_at = 0
+        while insert_at < len(out_lines) and out_lines[insert_at].startswith("from __future__ import "):
+            insert_at += 1
+        out_lines.insert(insert_at, "import math")
+        cleaned = "\n".join(out_lines).strip() + "\n"
 
-def _python_for_repo() -> str:
-    venv_python = Path(__file__).resolve().parent / ".venv" / "bin" / "python"
-    if venv_python.exists():
-        return str(venv_python)
-    return sys.executable
+    return cleaned
 
 
 def validate_generated_code(code: str, spec: FunctionSpec) -> None:
@@ -166,81 +174,7 @@ def run_code_main(
     inputs: list[Any],
     timeout_s: float = 60.0,
 ) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="ai_code_env_") as td:
-        td_path = Path(td)
-        user_path = td_path / "user_code.py"
-        runner_path = td_path / "runner.py"
-
-        user_path.write_text(clean_generated_code(code), encoding="utf-8")
-        runner_path.write_text(_RUNNER_PY, encoding="utf-8")
-
-        proc = subprocess.run(
-            [_python_for_repo(), str(runner_path), str(user_path)],
-            input=json.dumps({"inputs": inputs}),
-            text=True,
-            capture_output=True,
-            timeout=timeout_s,
-        )
-
-        out = proc.stdout.strip()
-        err = proc.stderr.strip()
-        payload: dict[str, Any]
-
-        if out:
-            try:
-                payload = json.loads(out)
-            except json.JSONDecodeError:
-                payload = {"ok": False, "error": "non_json_stdout", "stdout": out, "stderr": err}
-        else:
-            payload = {"ok": False, "error": "empty_stdout", "stdout": out, "stderr": err}
-
-        payload.setdefault("returncode", proc.returncode)
-        if err:
-            payload.setdefault("stderr", err)
-        return payload
-
-
-def run_code_main_batch(
-    code: str,
-    *,
-    batch_inputs: list[list[Any]],
-    timeout_s: float = 60.0,
-) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="ai_code_env_") as td:
-        td_path = Path(td)
-        user_path = td_path / "user_code.py"
-        runner_path = td_path / "runner.py"
-
-        user_path.write_text(clean_generated_code(code), encoding="utf-8")
-        runner_path.write_text(_RUNNER_PY, encoding="utf-8")
-
-        proc = subprocess.run(
-            [_python_for_repo(), str(runner_path), str(user_path)],
-            input=json.dumps({"batch_inputs": batch_inputs}),
-            text=True,
-            capture_output=True,
-            timeout=timeout_s,
-        )
-
-        out = proc.stdout.strip()
-        err = proc.stderr.strip()
-        payload: dict[str, Any]
-
-        if out:
-            try:
-                payload = json.loads(out)
-            except json.JSONDecodeError:
-                payload = {"ok": False, "error": "non_json_stdout", "stdout": out, "stderr": err}
-        else:
-            payload = {"ok": False, "error": "empty_stdout", "stdout": out, "stderr": err}
-
-        payload.setdefault("returncode", proc.returncode)
-        if err:
-            payload.setdefault("stderr", err)
-        return payload
-
-
-_RUNNER_PY = r"""
+    runner_src = r"""
 import importlib.util
 import json
 import sys
@@ -301,3 +235,145 @@ def main() -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 """
+
+    with tempfile.TemporaryDirectory(prefix="ai_code_env_") as td:
+        td_path = Path(td)
+        user_path = td_path / "user_code.py"
+        runner_path = td_path / "runner.py"
+
+        user_path.write_text(clean_generated_code(code), encoding="utf-8")
+        runner_path.write_text(runner_src, encoding="utf-8")
+
+        venv_python = Path(__file__).resolve().parent / ".venv" / "bin" / "python"
+        py = str(venv_python) if venv_python.exists() else sys.executable
+
+        proc = subprocess.run(
+            [py, str(runner_path), str(user_path)],
+            input=json.dumps({"inputs": inputs}),
+            text=True,
+            capture_output=True,
+            timeout=timeout_s,
+        )
+
+        out = proc.stdout.strip()
+        err = proc.stderr.strip()
+        payload: dict[str, Any]
+
+        if out:
+            try:
+                payload = json.loads(out)
+            except json.JSONDecodeError:
+                payload = {"ok": False, "error": "non_json_stdout", "stdout": out, "stderr": err}
+        else:
+            payload = {"ok": False, "error": "empty_stdout", "stdout": out, "stderr": err}
+
+        payload.setdefault("returncode", proc.returncode)
+        if err:
+            payload.setdefault("stderr", err)
+        return payload
+
+
+def run_code_main_batch(
+    code: str,
+    *,
+    batch_inputs: list[list[Any]],
+    timeout_s: float = 60.0,
+) -> dict[str, Any]:
+    runner_src = r"""
+import importlib.util
+import json
+import sys
+
+
+def _load_module(path: str):
+    try:
+        spec = importlib.util.spec_from_file_location("user_code", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return {"ok": True, "mod": mod}
+    except Exception as e:
+        return {"ok": False, "error": "load_failed", "message": str(e)}
+
+
+def main() -> int:
+    user_path = sys.argv[1]
+    payload = json.loads(sys.stdin.read() or "{}")
+    inputs = payload.get("inputs", None)
+    batch_inputs = payload.get("batch_inputs", None)
+
+    loaded = _load_module(user_path)
+    if not loaded.get("ok"):
+        print(json.dumps(loaded))
+        return 2
+
+    mod = loaded["mod"]
+    if not hasattr(mod, "main"):
+        print(json.dumps({"ok": False, "error": "missing_main"}))
+        return 3
+
+    try:
+        if inputs is not None and batch_inputs is not None:
+            print(json.dumps({"ok": False, "error": "ambiguous_inputs"}))
+            return 4
+        if batch_inputs is not None:
+            results = []
+            errors = 0
+            for one in batch_inputs:
+                try:
+                    results.append(mod.main(*one))
+                except Exception:
+                    results.append(None)
+                    errors += 1
+            print(json.dumps({"ok": True, "results": results, "errors": errors}))
+            return 0
+        if inputs is not None:
+            result = mod.main(*inputs)
+            print(json.dumps({"ok": True, "result": result}))
+            return 0
+        print(json.dumps({"ok": False, "error": "missing_inputs"}))
+        return 5
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": "exception", "message": str(e)}))
+        return 6
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+"""
+
+    with tempfile.TemporaryDirectory(prefix="ai_code_env_") as td:
+        td_path = Path(td)
+        user_path = td_path / "user_code.py"
+        runner_path = td_path / "runner.py"
+
+        user_path.write_text(clean_generated_code(code), encoding="utf-8")
+        runner_path.write_text(runner_src, encoding="utf-8")
+
+        venv_python = Path(__file__).resolve().parent / ".venv" / "bin" / "python"
+        py = str(venv_python) if venv_python.exists() else sys.executable
+
+        proc = subprocess.run(
+            [py, str(runner_path), str(user_path)],
+            input=json.dumps({"batch_inputs": batch_inputs}),
+            text=True,
+            capture_output=True,
+            timeout=timeout_s,
+        )
+
+        out = proc.stdout.strip()
+        err = proc.stderr.strip()
+        payload: dict[str, Any]
+
+        if out:
+            try:
+                payload = json.loads(out)
+            except json.JSONDecodeError:
+                payload = {"ok": False, "error": "non_json_stdout", "stdout": out, "stderr": err}
+        else:
+            payload = {"ok": False, "error": "empty_stdout", "stdout": out, "stderr": err}
+
+        payload.setdefault("returncode", proc.returncode)
+        if err:
+            payload.setdefault("stderr", err)
+        return payload
+

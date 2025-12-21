@@ -355,7 +355,7 @@ def build_bipedal_prompt(*, history: list[Attempt], seed: int) -> str:
         "def main(obs: list[float]) -> list[float]:\n"
         "\n"
         "Contract:\n"
-        "- `obs` is a list of 8 floats.\n"
+        "- `obs` is a list of floats.\n"
         "- Return a list of 4 floats.\n"
         "- The evaluator will clip floats to [-1, 1].\n"
         "- Imports: you may `import math` only.\n"
