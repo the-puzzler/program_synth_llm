@@ -36,6 +36,11 @@ def main(x0: float, x1: float) -> int:
 
 Quickstart
 
+- Install deps (once per machine):
+  - `uv sync`
+- Set API key:
+  - `export GROQ_API_KEY="..."` (or put it in `.env`)
+
 Black-box experiment (XOR)
 
 - Iteratively asks the model for a classifier `main(x0: float, x1: float) -> int` and only returns a scalar reward (accuracy) plus history:
@@ -67,4 +72,3 @@ NEAT-inspired experiment (BipedalWalker) (currently not effective/working)
 - We run that code in a sandbox and score it (XOR accuracy, or Bipedal distance/speed).
 - We keep a history of attempts and feed a small slice back into the prompt to bias the next proposal.
 - In the NEAT-style variant, we keep a population, select survivors/elites, create new programs via mutation/crossover prompts, and use a simple AST-based distance to form species and apply fitness sharing.
-
