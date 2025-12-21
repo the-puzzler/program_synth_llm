@@ -355,17 +355,18 @@ def build_bipedal_prompt(*, history: list[Attempt], seed: int) -> str:
         "def main(obs: list[float]) -> list[float]:\n"
         "\n"
         "Contract:\n"
-        "- `obs` is a list of floats.\n"
+        "- `obs` is a list of floats.\n" # besst runs did not specify 24
         "- Return a list of 4 floats.\n"
         "- The evaluator will clip floats to [-1, 1].\n"
-        "- Imports: you may `import math` only.\n"
+        "- Imports: you may use `math` only.\n"
         "- Do not read/write files, do not use network, do not print.\n"
+        #"Prioritize incremental changes to the functional form over parameter-only tuning.\n" # trialling this addition
         "\n"
         "Goal: maximize two scalar scores: `score_a` and `score_b`.\n"
         "Higher is better for both.\n"
         "\n"
         "Previous attempts to build from (scores + previous code):\n"
-        f"{_format_history_best_random_last(history, seed=seed, n_random=3, n_last=3)}\n"
+        f"{_format_history_best_random_last(history, seed=seed, n_random=3, n_last=3)}\n" #typically 3 and 3
     )
 
 
