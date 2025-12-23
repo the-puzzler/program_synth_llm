@@ -200,7 +200,10 @@ def main() -> None:
         invalid_preds: int | None = None
         batch_errors: int | None = None
         try:
-            validate_sandboxed_code(code, allowed_import_roots={"math"})
+            validate_sandboxed_code(
+                code,
+                allowed_import_roots={"math", "random", "itertools", "functools", "statistics"},
+            )
             _validate_main_exists_and_arity(code, n_args=2)
 
             batch_inputs = [[x0, x1] for (x0, x1, _y) in dataset]
