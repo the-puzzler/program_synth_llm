@@ -27,7 +27,7 @@ def main(obs: list[float]) -> list[float]:
     return [out0, out1, out2, out3]
 ```
 
-Tolicy used to render walker2d` :
+Tolicy used to render walker2d:
 
 ```python
 def main(obs: list[float]) -> list[float]:
