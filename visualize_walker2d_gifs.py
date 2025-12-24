@@ -38,6 +38,11 @@ import json
 import sys
 
 
+IDX1 = list(range(0, 8))
+IDX2 = [8, 9, 10]
+IDX3 = list(range(11, 17))
+
+
 def _load_module(path: str):
     spec = importlib.util.spec_from_file_location("policy", path)
     mod = importlib.util.module_from_spec(spec)
@@ -53,6 +58,26 @@ def _clip(x: float) -> float:
     if x != x:  # NaN
         return 0.0
     return max(-1.0, min(1.0, x))
+
+
+def _as_list2(v):
+    if not isinstance(v, (list, tuple)) or len(v) != 2:
+        raise ValueError("reducer must return a list/tuple of length 2")
+    return [_clip(v[0]), _clip(v[1])]
+
+
+def _compute_action(mod, obs):
+    if hasattr(mod, "reduce_1") and hasattr(mod, "reduce_2") and hasattr(mod, "reduce_3"):
+        o = list(obs)
+        x1 = [o[i] for i in IDX1]
+        x2 = [o[i] for i in IDX2]
+        x3 = [o[i] for i in IDX3]
+        f1 = _as_list2(mod.reduce_1(x1))
+        f2 = _as_list2(mod.reduce_2(x2))
+        f3 = _as_list2(mod.reduce_3(x3))
+        features = f1 + f2 + f3
+        return mod.main(features)
+    return mod.main(list(obs))
 
 
 def main() -> int:
@@ -126,7 +151,7 @@ def main() -> int:
 
     for t in range(max_steps):
         try:
-            action = mod.main(list(obs))
+            action = _compute_action(mod, obs)
             if not isinstance(action, (list, tuple)) or len(action) != 6:
                 raise ValueError("action must be a list/tuple of length 6")
             a = [_clip(action[i]) for i in range(6)]
@@ -141,6 +166,20 @@ def main() -> int:
         if (t % max(1, every)) == 0:
             frame = env.render()
             if frame is not None:
+                try:
+                    import numpy as np
+
+                    frame = np.asarray(frame)
+                    if getattr(frame, "ndim", 0) == 3 and frame.shape[-1] >= 3:
+                        frame = frame[..., :3]
+                    if frame.dtype != np.uint8:
+                        m = float(np.nanmax(frame))
+                        if m <= 1.5:
+                            frame = np.clip(frame * 255.0, 0.0, 255.0).astype(np.uint8)
+                        else:
+                            frame = np.clip(frame, 0.0, 255.0).astype(np.uint8)
+                except Exception:
+                    pass
                 if _have_pil and label:
                     img = Image.fromarray(frame[:, :, :3])
                     draw = ImageDraw.Draw(img)
@@ -208,9 +247,52 @@ def _python_for_repo() -> str:
 
 
 def _latest_run_dir(runs_root: Path = Path("runs")) -> Path:
-    candidates = sorted(p for p in runs_root.glob("walker2d_*") if p.is_dir())
+    def _parse_timestamp(name: str) -> tuple[int, ...] | None:
+        # Expect ..._YYYYMMDDTHHMMSSZ
+        parts = name.rsplit("_", 1)
+        if len(parts) != 2:
+            return None
+        ts = parts[1]
+        if len(ts) != 16 or ts[8] != "T" or ts[-1] != "Z":
+            return None
+        try:
+            y = int(ts[0:4])
+            m = int(ts[4:6])
+            d = int(ts[6:8])
+            hh = int(ts[9:11])
+            mm = int(ts[11:13])
+            ss = int(ts[13:15])
+        except Exception:
+            return None
+        return (y, m, d, hh, mm, ss)
+
+    def _sort_key(p: Path) -> tuple[int, tuple[int, ...], float, str]:
+        ts = _parse_timestamp(p.name)
+        if ts is not None:
+            return (1, ts, 0.0, p.as_posix())
+        try:
+            mtime = p.stat().st_mtime
+        except Exception:
+            mtime = 0.0
+        return (0, (), mtime, p.as_posix())
+
+    # Prefer "plain" walker2d runs directly under runs_root:
+    # `runs/walker2d_YYYYMMDDTHHMMSSZ`
+    direct_plain = [
+        p
+        for p in runs_root.glob("walker2d_*")
+        if p.is_dir() and p.name.count("_") == 1 and _parse_timestamp(p.name) is not None
+    ]
+    if direct_plain:
+        direct_plain.sort(key=_sort_key)
+        return direct_plain[-1]
+
+    # Fallback: search under runs_root recursively so moved/nested runs still show up
+    # (e.g. placeholding/hier runs).
+    candidates = [p for p in runs_root.rglob("walker2d_*") if p.is_dir()]
     if not candidates:
-        raise SystemExit(f"No walker2d runs found under {runs_root}")
+        raise SystemExit(f"No walker2d runs found under {runs_root}.")
+    candidates.sort(key=_sort_key)
     return candidates[-1]
 
 
@@ -511,4 +593,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

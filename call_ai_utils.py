@@ -58,19 +58,33 @@ def _provider() -> str:
         return forced
     if os.getenv("OPENROUTER_API_KEY"):
         return "openrouter"
+    if os.getenv("GROQ_API_KEY"):
+        return "groq"
     return "groq"
 
 
 def _make_client() -> Any:
     prov = _provider()
     if prov == "openrouter":
+        api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "OpenRouter selected but `OPENROUTER_API_KEY` is not set. "
+                "Set `OPENROUTER_API_KEY` (recommended) or set `AI_PROVIDER=groq` with `GROQ_API_KEY`."
+            )
         return OpenAI(
             base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-            api_key=os.getenv("OPENROUTER_API_KEY", ""),
+            api_key=api_key,
         )
     if prov == "groq":
         if Groq is None:
             raise RuntimeError("Groq SDK not installed, and OpenRouter not configured.")
+        api_key = (os.getenv("GROQ_API_KEY") or "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "Groq selected but `GROQ_API_KEY` is not set. "
+                "Set `OPENROUTER_API_KEY` to use OpenRouter (recommended), or set `GROQ_API_KEY`."
+            )
         return Groq()
     raise RuntimeError(f"Unknown AI provider: {prov!r} (use openrouter|groq)")
 
