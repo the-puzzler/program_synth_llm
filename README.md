@@ -8,7 +8,7 @@ This repo runs simple black-box “program evolution” loops where an LLM propo
 | --- | --- |
 | ![best_biped.gif](best_biped.gif) | ![iter_079_optimized.gif](iter_079_optimized.gif) |
 
-`policy.py` (the policy used to render `best_biped.gif`):
+The policy used to render biped:
 
 ```python
 def main(obs: list[float]) -> list[float]:
@@ -25,6 +25,20 @@ def main(obs: list[float]) -> list[float]:
     out2 = math.tanh(8.3*f1 * f3 - 8*f2 * f4 + 2.5*c - 2.5*a*d)
     out3 = math.tanh(f1 - f2 + f3 - f4)
     return [out0, out1, out2, out3]
+```
+
+Tolicy used to render walker2d` :
+
+```python
+def main(obs: list[float]) -> list[float]:
+    s, c, h, t = (math.sin, math.cos, math.sinh, math.tanh)
+    a1 = obs[0] * 2.0 + s(obs[4]) * 0.6 + t(obs[7]) * 0.4 - obs[9] * 0.5 + (obs[14] - obs[13]) * 0.1 + c(obs[16]) * 0.0 - s(obs[15]) * 0.0
+    a2 = obs[1] * -2.4 + c(obs[5]) * 0.7 + h(obs[8]) * 0.0 - obs[15] * 0.0 + t(obs[11]) * 0.0 + s(obs[12]) * 0.0
+    a3 = obs[2] * 2.1 + h(obs[6]) * 0.4 + t(obs[10]) * 0.1 + obs[11] * 0.1 - h(obs[9]) * 0.0 + s(obs[16]) * 0.0
+    a4 = obs[3] * -1.1 + obs[8] * 0.3 - s(obs[11]) * 0.0 + c(obs[12]) * 0.1 + t(obs[15]) * 0.0
+    a5 = obs[12] * 0.3 - s(obs[13]) * 0.0 + c(obs[16]) * 0.1 - t(obs[15]) * 0.0 + obs[14] * 0.1 + h(obs[7]) * 0.0
+    a6 = 0.0
+    return [a1, a2, a3, a4, a5, a6]
 ```
 
 **XOR (reference solution)**
@@ -84,25 +98,6 @@ Black-box experiment (MuJoCo Walker2d)
   - Optimize float weights of an existing policy (fixed topology):
     - `uv run walker2d_weight_optimize.py runs/walker2d_YYYYMMDDTHHMMSSZ/iter_079.py` (writes `*_optimized.py` + `*_weight_opt.jsonl`)
 
-Reference policy used to render `iter_079_optimized.gif` (floats rounded to 1 decimal place for readability):
-
-```python
-import math
-import random
-import itertools
-import functools
-import statistics
-
-def main(obs: list[float]) -> list[float]:
-    s, c, h, t = (math.sin, math.cos, math.sinh, math.tanh)
-    a1 = obs[0] * 2.0 + s(obs[4]) * 0.6 + t(obs[7]) * 0.4 - obs[9] * 0.5 + (obs[14] - obs[13]) * 0.1 + c(obs[16]) * 0.0 - s(obs[15]) * 0.0
-    a2 = obs[1] * -2.4 + c(obs[5]) * 0.7 + h(obs[8]) * 0.0 - obs[15] * 0.0 + t(obs[11]) * 0.0 + s(obs[12]) * 0.0
-    a3 = obs[2] * 2.1 + h(obs[6]) * 0.4 + t(obs[10]) * 0.1 + obs[11] * 0.1 - h(obs[9]) * 0.0 + s(obs[16]) * 0.0
-    a4 = obs[3] * -1.1 + obs[8] * 0.3 - s(obs[11]) * 0.0 + c(obs[12]) * 0.1 + t(obs[15]) * 0.0
-    a5 = obs[12] * 0.3 - s(obs[13]) * 0.0 + c(obs[16]) * 0.1 - t(obs[15]) * 0.0 + obs[14] * 0.1 + h(obs[7]) * 0.0
-    a6 = 0.0
-    return [a1, a2, a3, a4, a5, a6]
-```
 
 ## How It Works (Very Briefly)
 
