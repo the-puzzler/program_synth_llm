@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ai_code_env import clean_generated_code, validate_sandboxed_code
+from program_synth.ai_code_env import clean_generated_code, validate_sandboxed_code
 
 try:
     import numpy as np  # type: ignore
@@ -175,7 +175,9 @@ def main() -> int:
         if steps > 0:
             avg_speed = float(distance / steps)
 
-    imageio.mimsave(out_path, frames, fps=fps)
+    # Write MP4 via imageio; this mirrors a known-working pattern that uses
+    # `mimsave` to produce valid MP4 files given a list of RGB frames.
+    imageio.mimsave(out_path, frames, fps=fps, codec="libx264")
     print(
         json.dumps(
             {
@@ -223,7 +225,7 @@ def _iter_files(run_dir: Path) -> list[Path]:
 def _run_one(
     code: str,
     *,
-    out_gif: Path,
+    out_video: Path,
     env_id: str,
     seed: int,
     max_steps: int,
@@ -232,7 +234,7 @@ def _run_one(
     timeout_s: float,
     label: str | None = None,
 ) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="bipedal_gif_") as td:
+    with tempfile.TemporaryDirectory(prefix="bipedal_video_") as td:
         td_path = Path(td)
         policy_path = td_path / "policy.py"
         runner_path = td_path / "runner.py"
@@ -244,7 +246,7 @@ def _run_one(
             input=json.dumps(
                 {
                     "policy_path": str(policy_path),
-                    "out_path": str(out_gif),
+                    "out_path": str(out_video),
                     "label": label,
                     "env_id": env_id,
                     "seed": seed,
@@ -365,8 +367,8 @@ def _load_attempt_metrics(run_dir: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _make_sequence_gif(
-    gif_paths: list[Path],
+def _make_sequence_video(
+    video_paths: list[Path],
     *,
     out_path: Path,
     fps: int,
@@ -378,14 +380,14 @@ def _make_sequence_gif(
         raise RuntimeError("Sequence requires `imageio` and `numpy`.")
     assert imageio is not None and np is not None
 
-    gifs = [p for p in gif_paths if p.exists()]
+    videos = [p for p in video_paths if p.exists()]
     if limit is not None and limit > 0:
-        gifs = gifs[-limit:]
-    if not gifs:
-        raise RuntimeError("No GIFs available to sequence.")
+        videos = videos[-limit:]
+    if not videos:
+        raise RuntimeError("No videos available to sequence.")
 
     def _first_frame_size(path: Path) -> tuple[int, int] | None:
-        # Prefer Pillow for reading GIFs (avoids imageio backend/plugin issues).
+        # Prefer Pillow for reading frames (avoids imageio backend/plugin issues).
         if _HAVE_PIL:
             assert Image is not None
             try:
@@ -418,18 +420,18 @@ def _make_sequence_gif(
             reader.close()
 
     # Stream processing to avoid imageio's memtest threshold (and huge RAM usage).
-    # 1) Determine a common crop size by reading only the first frame of each GIF.
+    # 1) Determine a common crop size by reading only the first frame of each video.
     min_h: int | None = None
     min_w: int | None = None
-    readable_gifs: list[Path] = []
-    for p in gifs:
+    readable_videos: list[Path] = []
+    for p in videos:
         size = _first_frame_size(p)
         if size is None:
             continue
         h, w = size
         min_h = h if min_h is None else min(min_h, h)
         min_w = w if min_w is None else min(min_w, w)
-        readable_gifs.append(p)
+        readable_videos.append(p)
     if min_h is None or min_w is None:
         raise RuntimeError("Could not read any frames from the selected GIFs.")
 
@@ -446,26 +448,28 @@ def _make_sequence_gif(
     stride = max(1, int(round(speed))) if speed > 1.0 else 1
     repeat = max(1, int(round(1.0 / speed))) if speed < 1.0 else 1
 
-    writer = imageio.get_writer(out_path, mode="I", fps=max(1, int(fps)))
-    try:
-        for p in readable_gifs:
-            base = _iter_label_from_path(p)
-            meta = meta_by_stem.get(p.stem) if meta_by_stem else None
-            label = _format_metrics_label(base, meta)
-            try:
-                for i, f in enumerate(_iter_frames(p)):
-                    if stride > 1 and (i % stride) != 0:
-                        continue
-                    frame = crop(f)
-                    if _HAVE_PIL:
-                        frame = _overlay_label(frame, label)
-                    for _ in range(repeat):
-                        writer.append_data(frame)
-            except Exception:
-                # Skip unreadable/corrupt gifs instead of failing the whole collage.
-                continue
-    finally:
-        writer.close()
+    frames_out: list[Any] = []
+    for p in readable_videos:
+        base = _iter_label_from_path(p)
+        meta = meta_by_stem.get(p.stem) if meta_by_stem else None
+        label = _format_metrics_label(base, meta)
+        try:
+            for i, f in enumerate(_iter_frames(p)):
+                if stride > 1 and (i % stride) != 0:
+                    continue
+                frame = crop(f)
+                if _HAVE_PIL:
+                    frame = _overlay_label(frame, label)
+                for _ in range(repeat):
+                    frames_out.append(frame)
+        except Exception:
+            # Skip unreadable/corrupt videos instead of failing the whole collage.
+            continue
+
+    if not frames_out:
+        raise RuntimeError("No frames available to write collage.")
+
+    imageio.mimsave(out_path, frames_out, fps=max(1, int(fps)), codec="libx264")
     return out_path
 
 
@@ -497,7 +501,7 @@ def main() -> None:
     if not iters:
         raise SystemExit(f"No `iter_*.py` files found in {run_dir}")
 
-    out_dir = run_dir / "gifs"
+    out_dir = run_dir / "videos"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rendered: list[Path] = []
@@ -513,41 +517,41 @@ def main() -> None:
             print(json.dumps({"iter": it_path.name, "ok": False, "error": f"sandbox: {e}"}))
             continue
 
-        out_gif = out_dir / f"{it_path.stem}.gif"
-        if out_gif.exists() and not args.force:
-            rendered.append(out_gif)
+        out_video = out_dir / f"{it_path.stem}.mp4"
+        if out_video.exists() and not args.force:
+            rendered.append(out_video)
             print(
                 json.dumps(
-                    {"iter": it_path.name, "ok": True, "skipped": True, "out_path": str(out_gif)},
+                    {"iter": it_path.name, "ok": True, "skipped": True, "out_path": str(out_video)},
                     indent=2,
                 )
             )
             continue
 
-        label = _format_metrics_label(_iter_label_from_path(out_gif), meta_by_stem.get(out_gif.stem))
+        label = _format_metrics_label(_iter_label_from_path(out_video), meta_by_stem.get(out_video.stem))
         result = _run_one(
             code,
-            out_gif=out_gif,
+            out_video=out_video,
             env_id=args.env_id,
             seed=args.seed,
             max_steps=args.max_steps,
             every=args.every,
-            fps=args.fps,
+            fps=int(args.fps * 3),
             timeout_s=args.timeout,
             label=label,
         )
-        if result.get("ok") and out_gif.exists():
-            rendered.append(out_gif)
+        if result.get("ok") and out_video.exists():
+            rendered.append(out_video)
         print(json.dumps({"iter": it_path.name, **result}, indent=2))
 
     if args.collage:
         limit = None if args.collage_limit == 0 else args.collage_limit
         try:
-            out = _make_sequence_gif(
+            out = _make_sequence_video(
                 rendered,
-                out_path=out_dir / "collage.gif",
+                out_path=out_dir / "collage.mp4",
                 fps=args.fps,
-                speed=2.0,
+                speed=3.0,
                 limit=limit,
                 meta_by_stem=meta_by_stem,
             )

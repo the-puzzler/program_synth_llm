@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from ai_code_env import FunctionSpec, run_code_main_batch, validate_generated_code, validate_sandboxed_code
+from program_synth.ai_code_env import FunctionSpec, run_code_main_batch, validate_generated_code, validate_sandboxed_code
 
 try:
     import numpy as np  # type: ignore

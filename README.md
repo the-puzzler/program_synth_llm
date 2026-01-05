@@ -56,47 +56,48 @@ Quickstart
   - `uv sync`
 - Set API key:
   - `export OPENROUTER_API_KEY="..."` (or put it in `.env`)
+ - Run commands from the repo root with `PYTHONPATH=src` so the `program_synth` package is importable.
 
 Black-box experiment (XOR)
 
 - Iteratively asks the model for a classifier `main(x0: float, x1: float) -> int` and only returns a scalar reward (accuracy) plus history:
-  - `uv run xor_fitness_loop.py`
+  - `PYTHONPATH=src uv run python -m program_synth.loops.xor_fitness_loop`
   - After a run, render one combined figure (`all_boundaries.png`) with subplots for every `iter_###.py`:
-  - Latest run: `uv run visualize_boundaries.py`
-  - Specific run: `uv run visualize_boundaries.py runs/xor_YYYYMMDDTHHMMSSZ`
+  - Latest run: `PYTHONPATH=src uv run python -m program_synth.visualization.visualize_boundaries`
+  - Specific run: `PYTHONPATH=src uv run python -m program_synth.visualization.visualize_boundaries runs/xor_YYYYMMDDTHHMMSSZ`
 
 Black-box experiment (BipedalWalker)
 
 - Iteratively asks the model for a policy `main(obs: list[float]) -> list[float]` (4-dim action) and scores average episode return:
   - Install env deps: `uv add "gymnasium[box2d]"` (or otherwise install Gymnasium + Box2D)
-  - Run: `uv run bipedal_fitness_loop.py`
+  - Run: `PYTHONPATH=src uv run python -m program_synth.loops.bipedal_fitness_loop`
   - Render GIFs (per-iteration) after a run:
-    - `uv run visualize_bipedal_gifs.py` (defaults to latest `runs/bipedal_*`)
-    - Collage (sequential) GIF: `uv run visualize_bipedal_gifs.py --collage --collage-limit 16`
+    - `PYTHONPATH=src uv run python -m program_synth.visualization.visualize_bipedal_gifs` (defaults to latest `runs/bipedal_*`)
+    - Collage (sequential) GIF: `PYTHONPATH=src uv run python -m program_synth.visualization.visualize_bipedal_gifs --collage --collage-limit 16`
   - Render a one-off GIF from a specific policy:
-    - `uv run render_bipedal_gif.py --code-path policy.py`
+    - `PYTHONPATH=src uv run python -m program_synth.visualization.render_bipedal_gif --code-path policy.py`
 
 NEAT-inspired experiment (BipedalWalker) (currently not effective/working)
 
 - A population-based loop with selection, crossover, and speciation (fitness sharing):
-  - Run: `uv run neat_bipedal_fitness_loop.py`
-  - Resume: `uv run neat_bipedal_fitness_loop.py --checkpoint-path runs/neat_bipedal_YYYYMMDDTHHMMSSZ`
+  - Run: `PYTHONPATH=src uv run python -m program_synth.loops.neat_bipedal_fitness_loop`
+  - Resume: `PYTHONPATH=src uv run python -m program_synth.loops.neat_bipedal_fitness_loop --checkpoint-path runs/neat_bipedal_YYYYMMDDTHHMMSSZ`
 
 Black-box experiment (Atari Pong)
 
 - Iteratively asks the model for a policy `main(obs: list[float]) -> int` and scores average episode return:
   - Install env deps: `uv add "gymnasium[atari,accept-rom-license]"`
-  - Run: `uv run pong_fitness_loop.py`
+  - Run: `PYTHONPATH=src uv run python -m program_synth.loops.pong_fitness_loop`
 
 Black-box experiment (MuJoCo Walker2d)
 
 - Iteratively asks the model for a policy `main(obs: list[float]) -> list[float]` (6-dim action) and scores it:
   - Install env deps: `uv add "gymnasium[mujoco]"`
-  - Run: `uv run walker2d_fitness_loop.py`
+  - Run: `PYTHONPATH=src uv run python -m program_synth.loops.walker2d_fitness_loop`
   - Render GIFs (per-iteration) after a run:
-    - `uv run visualize_walker2d_gifs.py` (defaults to latest `runs/walker2d_*`)
+    - `PYTHONPATH=src uv run python -m program_synth.visualization.visualize_walker2d_gifs` (defaults to latest `runs/walker2d_*`)
   - Optimize float weights of an existing policy (fixed topology):
-    - `uv run walker2d_weight_optimize.py runs/walker2d_YYYYMMDDTHHMMSSZ/iter_079.py` (writes `*_optimized.py` + `*_weight_opt.jsonl`)
+    - `PYTHONPATH=src uv run python -m program_synth.loops.walker2d_weight_optimize runs/walker2d_YYYYMMDDTHHMMSSZ/iter_079.py` (writes `*_optimized.py` + `*_weight_opt.jsonl`)
 
 
 ## How It Works (Very Briefly)

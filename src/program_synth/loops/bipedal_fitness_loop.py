@@ -8,7 +8,7 @@ import random
 import re
 import subprocess
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +16,7 @@ from typing import Any
 
 from program_synth.ai_code_env import clean_generated_code, extract_python_code, validate_sandboxed_code
 from program_synth.call_ai_utils import call_ai
+from program_synth.embedding_utils import cosine_similarity, embed_texts
 
 
 @dataclass
@@ -95,38 +96,6 @@ def _load_attempt_history(run_dir: Path) -> list[Attempt]:
     return history
 
 
-def _load_seen_programs(run_dir: Path) -> list[tuple[str, list[float], int, int]]:
-    """
-    Reconstruct `seen_programs` for minuscule-change warnings from `candidates.jsonl`.
-    Best-effort: skips malformed records.
-    """
-    path = run_dir / "candidates.jsonl"
-    if not path.exists():
-        return []
-    out: list[tuple[str, list[float], int, int]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        if not isinstance(rec, dict):
-            continue
-        code = rec.get("code")
-        it = rec.get("iteration")
-        idx = rec.get("candidate_index")
-        if not isinstance(code, str) or not isinstance(it, int) or not isinstance(idx, int):
-            continue
-        try:
-            sig, nums = _code_signature_and_numbers(code)
-            out.append((sig, nums, int(it), int(idx)))
-        except Exception:
-            continue
-    return out
-
-
 def _max_existing_iter(run_dir: Path) -> int:
     """
     Determine the highest iteration index present in the run dir from iter_XXX.py files.
@@ -185,125 +154,21 @@ def _format_history_all(history: list[Attempt]) -> str:
     return "\n".join(lines)
 
 
-class _NumericNormalizer(ast.NodeTransformer):
-    def visit_Constant(self, node: ast.Constant) -> ast.AST:
-        if isinstance(node.value, (int, float)):
-            return ast.copy_location(ast.Constant(value=0), node)
-        return node
-
-    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
-        node = self.generic_visit(node)  # type: ignore[assignment]
-        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-            if isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, (int, float)):
-                return ast.copy_location(ast.Constant(value=0), node)
-        return node
+EMBEDDING_SIM_THRESHOLD = 0.98
 
 
-class _NumericExtractor(ast.NodeVisitor):
-    def __init__(self) -> None:
-        self.values: list[float] = []
-
-    def visit_UnaryOp(self, node: ast.UnaryOp) -> None:
-        if isinstance(node.op, (ast.UAdd, ast.USub)) and isinstance(node.operand, ast.Constant):
-            if isinstance(node.operand.value, (int, float)):
-                v = float(node.operand.value)
-                if isinstance(node.op, ast.USub):
-                    v = -v
-                self.values.append(v)
-                return
-        self.generic_visit(node)
-
-    def visit_Constant(self, node: ast.Constant) -> None:
-        if isinstance(node.value, (int, float)):
-            self.values.append(float(node.value))
-        # Don't recurse.
-
-
-def _code_signature_and_numbers(code: str) -> tuple[str, list[float]]:
-    tree = ast.parse(code)
-    extractor = _NumericExtractor()
-    extractor.visit(tree)
-    normalized = _NumericNormalizer().visit(tree)
-    ast.fix_missing_locations(normalized)
-    sig = ast.dump(normalized, include_attributes=False)
-    return sig, extractor.values
-
-
-def _miniscule_param_change_warning(
-    sig: str,
-    nums: list[float],
-    *,
-    seen: list[tuple[str, list[float], int, int]],
-) -> tuple[str | None, dict[str, Any] | None]:
+def _eval_policy_for_pool(args: tuple[str, str, list[int], int, float]) -> dict[str, Any]:
     """
-    If the structure (sig) matches a prior program and numeric constants changed only slightly,
-    return a warning message and metadata about the match.
+    Helper for ProcessPoolExecutor: evaluate a single candidate policy.
     """
-    if not nums:
-        return None, None
-
-    # Heuristics for "minor numeric tweaks".
-    max_rel_thresh = 0.05
-    mean_rel_thresh = 0.02
-    max_abs_thresh = 0.2
-    mean_abs_thresh = 0.05
-
-    best: tuple[float, float, int, int, float, float] | None = None  # (max_rel, mean_rel, step, idx, max_abs, mean_abs)
-    for prev_sig, prev_nums, prev_step, prev_idx in seen:
-        if prev_sig != sig:
-            continue
-        if len(prev_nums) != len(nums) or not prev_nums:
-            continue
-        rels: list[float] = []
-        abss: list[float] = []
-        for a, b in zip(prev_nums, nums):
-            d = abs(a - b)
-            abss.append(d)
-            denom = max(1e-6, abs(a), abs(b))
-            rel = d / denom
-            rels.append(rel)
-        max_rel = max(rels)
-        mean_rel = sum(rels) / len(rels)
-        max_abs = max(abss)
-        mean_abs = sum(abss) / len(abss)
-
-        # Identical program (or numerically identical constants).
-        if max_abs <= 1e-12:
-            return (
-                "WARNING: only miniscule paramter change detected, inefficient. more topological change required",
-                {"type": "identical", "similar_step": prev_step, "similar_candidate_index": prev_idx},
-            )
-
-        # "Miniscule" tweak heuristic.
-        if (
-            max_rel <= max_rel_thresh
-            and mean_rel <= mean_rel_thresh
-            and max_abs <= max_abs_thresh
-            and mean_abs <= mean_abs_thresh
-        ):
-            if best is None or (max_rel, mean_rel, max_abs, mean_abs) < (
-                best[0],
-                best[1],
-                best[4],
-                best[5],
-            ):
-                best = (max_rel, mean_rel, prev_step, prev_idx, max_abs, mean_abs)
-
-    if best is None:
-        return None, None
-
-    _max_rel, _mean_rel, prev_step, prev_idx, _max_abs, _mean_abs = best
-    warning = "WARNING: only miniscule paramter change detected, inefficient. more topological change required"
-    meta = {
-        "type": "minuscule_params",
-        "similar_step": prev_step,
-        "similar_candidate_index": prev_idx,
-        "max_rel": _max_rel,
-        "mean_rel": _mean_rel,
-        "max_abs": _max_abs,
-        "mean_abs": _mean_abs,
-    }
-    return warning, meta
+    code, env_id, seeds, max_steps, timeout_s = args
+    return evaluate_policy(
+        code,
+        env_id=env_id,
+        seeds=seeds,
+        max_steps=max_steps,
+        timeout_s=timeout_s,
+    )
 
 
 def _format_history_best_random_last(
@@ -313,6 +178,10 @@ def _format_history_best_random_last(
     n_random: int = 3,
     n_last: int = 3,
 ) -> str:
+    """
+    Build a short history view: BEST overall, a few RANDOM, and a few LAST attempts.
+    Simple de-duplication (by identity) to avoid repeating the same Attempt object.
+    """
     if not history:
         return "No prior attempts.\n"
 
@@ -329,29 +198,13 @@ def _format_history_best_random_last(
     for i, a in enumerate(last, start=1):
         chosen.append((f"LAST_{i}", a))
 
-    # De-dupe while preserving order (in case BEST is also in LAST_*).
-    seen: set[int] = set()
-    seen_sigs: set[str] = set()
+    seen_ids: set[int] = set()
     out: list[str] = []
     kept = 0
     for label, a in chosen:
-        key = id(a)
-        if key in seen:
+        if id(a) in seen_ids:
             continue
-        seen.add(key)
-        try:
-            sig, _nums = _code_signature_and_numbers(a.code)
-        except Exception:
-            sig = ""
-        if sig:
-            if sig in seen_sigs:
-                continue
-            seen_sigs.add(sig)
-        else:
-            text_key = f"code:{hash(a.code)}"
-            if text_key in seen_sigs:
-                continue
-            seen_sigs.add(text_key)
+        seen_ids.add(id(a))
         snippet = "\n".join(a.code.strip().splitlines()[:12])
         header = f"{label}: score_a={a.score_a:.6f} score_b={a.score_b:.6f}"
         if a.comment:
@@ -673,13 +526,11 @@ def main() -> None:
     # Resume state if checkpoint provided.
     if args.checkpoint_path is not None:
         history = _load_attempt_history(run_dir)
-        seen_programs = _load_seen_programs(run_dir)
         last_iter = max((a.iteration for a in history), default=0)
         last_file_iter = _max_existing_iter(run_dir)
         start_step = max(last_iter, last_file_iter) + 1
     else:
         history = []
-        seen_programs = []
         start_step = 1
 
     iterations = args.iterations
@@ -687,6 +538,14 @@ def main() -> None:
     attempts_path = run_dir / "attempts.jsonl"
     candidates_path = run_dir / "candidates.jsonl"
     meta_path = run_dir / "meta.json"
+
+    # Embedding archive of canonical solutions (best program per iteration).
+    canonical_embeddings: list[list[float]] = []
+    if history:
+        try:
+            canonical_embeddings = embed_texts([a.code for a in history])
+        except Exception:
+            canonical_embeddings = []
 
     # Write meta only for brand-new runs; for checkpoints keep the existing meta.json as-is.
     if args.checkpoint_path is None and not meta_path.exists():
@@ -711,18 +570,84 @@ def main() -> None:
             encoding="utf-8",
         )
 
-    for step in range(start_step, start_step + iterations):
-        prompts = [
-            build_bipedal_prompt(history=history, seed=(step * 10_000 + i))
-            for i in range(concurrent)
-        ]
+    max_similarity_retries = 2
 
-        def _one_prompt(p: str):
-            return call_ai(p, concurrent_calls=1, temperature=temperature)[0]
+    for step in range(start_step, start_step + iterations):
+        # For each concurrent slot, sample up to (max_similarity_retries + 1)
+        # candidates. This sampling (LLM calls + similarity checks) is done in
+        # parallel across slots using threads; similarity is measured only
+        # against the canonical archive from previous iterations.
+        all_attempts: list[dict[str, Any]] = []
+        accepted_candidates: list[dict[str, Any]] = []
+
+        def _generate_for_slot(idx: int) -> dict[str, Any]:
+            slot_attempts: list[dict[str, Any]] = []
+            accepted_for_slot: dict[str, Any] | None = None
+
+            for retry in range(max_similarity_retries + 1):
+                prompt = build_bipedal_prompt(history=history, seed=(step * 10_000 + idx * 100 + retry))
+                response = call_ai(prompt, concurrent_calls=1, temperature=temperature)[0]
+                content = response.choices[0].message.content
+                code = clean_generated_code(extract_python_code(content))
+
+                max_sim: float | None = None
+                similarity: dict[str, Any] | None = None
+
+                # Embedding-based similarity to canonical archive.
+                try:
+                    emb = embed_texts([code])[0]
+                    if canonical_embeddings:
+                        max_sim = max(cosine_similarity(emb, prev) for prev in canonical_embeddings)
+                    else:
+                        max_sim = 0.0
+                    similarity = {"max_cosine": float(max_sim)}
+                except Exception:
+                    # If embeddings fail, treat as "no similarity info" and accept.
+                    max_sim = None
+                    similarity = None
+
+                attempt: dict[str, Any] = {
+                    "index": idx,
+                    "prompt": prompt,
+                    "response_raw": response.raw,
+                    "code": code,
+                    "max_cosine": max_sim,
+                    "similarity": similarity,
+                    "comment": None,
+                }
+                slot_attempts.append(attempt)
+
+                # Accept if similarity is unavailable or <= threshold.
+                if max_sim is None or max_sim <= EMBEDDING_SIM_THRESHOLD:
+                    accepted_for_slot = attempt
+                    break
+
+            return {"slot_attempts": slot_attempts, "accepted": accepted_for_slot}
 
         with ThreadPoolExecutor(max_workers=concurrent) as executor:
-            futures = [executor.submit(_one_prompt, p) for p in prompts]
-            responses = [f.result() for f in futures]
+            results = list(executor.map(_generate_for_slot, range(concurrent)))
+
+        for res in results:
+            slot_attempts = res["slot_attempts"]
+            accepted_for_slot = res["accepted"]
+            all_attempts.extend(slot_attempts)
+            if accepted_for_slot is not None:
+                accepted_candidates.append(accepted_for_slot)
+
+        # Decide which candidates to evaluate this iteration.
+        if accepted_candidates:
+            candidates_to_eval = accepted_candidates
+        else:
+            # Fallback: no accepted candidates; pick the single least-similar
+            # attempt (minimum max_cosine). Ignore attempts without similarity info.
+            viable = [a for a in all_attempts if isinstance(a.get("max_cosine"), (int, float))]
+            if not viable:
+                # Extremely defensive fallback: no similarity info at all; just
+                # evaluate the first attempt if present.
+                candidates_to_eval = all_attempts[:1]
+            else:
+                best_attempt = min(viable, key=lambda a: float(a["max_cosine"]))
+                candidates_to_eval = [best_attempt]
 
         best_reward = float("-inf")
         best_code: str | None = None
@@ -731,55 +656,72 @@ def main() -> None:
         best_score_a = float("-inf")
         best_score_b = float("-inf")
 
-        for idx, response in enumerate(responses):
-            prompt = prompts[idx]
-            content = response.choices[0].message.content
-            code = clean_generated_code(extract_python_code(content))
-
-            candidate_reward = float("-inf")
-            error: str | None = None
-            step_errors: int | None = None
-            episodes: list[dict[str, Any]] | None = None
-            avg_return: float | None = None
-            avg_distance: float | None = None
-            avg_speed: float | None = None
-            comment: str | None = None
-            similarity: dict[str, Any] | None = None
-
+        # Validate code locally, then evaluate policies in parallel using processes.
+        valid_candidates: list[dict[str, Any]] = []
+        for cand in candidates_to_eval:
+            code = str(cand.get("code") or "")
             try:
                 validate_sandboxed_code(
                     code,
                     allowed_import_roots={"math", "random", "itertools", "functools", "statistics"},
                 )
                 _validate_main_exists(code)
-                sig, nums = _code_signature_and_numbers(code)
-                comment, similarity = _miniscule_param_change_warning(sig, nums, seen=seen_programs)
-                result = evaluate_policy(
-                    code,
-                    env_id=env_id,
-                    seeds=seeds,
-                    max_steps=max_steps,
-                    timeout_s=timeout_s,
-                )
+            except Exception as e:
+                cand["eval_error"] = str(e)
+                cand["eval_result"] = None
+                continue
+            valid_candidates.append(cand)
+
+        eval_results: list[dict[str, Any]] = []
+        if valid_candidates:
+            eval_args = [
+                (str(cand.get("code") or ""), env_id, seeds, max_steps, timeout_s)
+                for cand in valid_candidates
+            ]
+            max_workers = min(concurrent, len(eval_args))
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                eval_results = list(executor.map(_eval_policy_for_pool, eval_args))
+
+        # Attach results back to candidates (in original order: candidates_to_eval).
+        eval_iter = iter(eval_results)
+        for cand in candidates_to_eval:
+            idx = int(cand["index"])
+            prompt = str(cand.get("prompt") or "")
+            code = str(cand.get("code") or "")
+            comment: str | None = cand.get("comment")
+            similarity: dict[str, Any] | None = cand.get("similarity")
+
+            if cand in valid_candidates:
+                result = next(eval_iter, None)
+            else:
+                result = None
+
+            error: str | None = None
+            step_errors: int | None = None
+            episodes: list[dict[str, Any]] | None = None
+            avg_return: float | None = None
+            avg_distance: float | None = None
+            avg_speed: float | None = None
+
+            if result is None:
+                error = cand.get("eval_error")
+                score_a = float("-inf")
+                score_b = float("-inf")
+            else:
                 if not result.get("ok"):
                     error = str(result.get("error") or "eval_failed")
+                    score_a = float("-inf")
+                    score_b = float("-inf")
                 else:
                     avg_return = float(result.get("avg_return"))
                     avg_distance = result.get("avg_distance")
                     avg_distance = float(avg_distance) if avg_distance is not None else None
                     avg_speed = result.get("avg_speed")
                     avg_speed = float(avg_speed) if avg_speed is not None else None
-                    # Two maximize-able scores (do not reveal their meaning in the prompt).
                     score_a = avg_distance if avg_distance is not None else float("-inf")
                     score_b = avg_speed if avg_speed is not None else float("-inf")
-                    candidate_reward = score_a  # kept for backward-compat logging
                     step_errors = int(result.get("step_errors", 0))
                     episodes = list(result.get("episodes", []))
-            except Exception as e:
-                error = str(e)
-
-            score_a = avg_distance if avg_distance is not None else float("-inf")
-            score_b = avg_speed if avg_speed is not None else float("-inf")
 
             cand_record = {
                 "iteration": step,
@@ -795,7 +737,7 @@ def main() -> None:
                 "comment": comment,
                 "similarity": similarity,
                 "prompt": prompt,
-                "response": _jsonable(response.raw),
+                "response": _jsonable(cand.get("response_raw")),
                 "code": code,
             }
             with candidates_path.open("a", encoding="utf-8") as f:
@@ -819,13 +761,6 @@ def main() -> None:
                     "similarity": similarity,
                 }
 
-            # Track every candidate (not just the best) for similarity checks later.
-            try:
-                sig, nums = _code_signature_and_numbers(code)
-                seen_programs.append((sig, nums, step, idx))
-            except Exception:
-                pass
-
         if best_code is None:
             best_code = "def main(obs: list[float]) -> list[float]:\n    return [0.0, 0.0, 0.0, 0.0]\n"
             best_reward = float("-inf")
@@ -841,6 +776,13 @@ def main() -> None:
                 comment=(best_detail or {}).get("comment") if isinstance(best_detail, dict) else None,
             )
         )
+
+        # Add the canonical best program for this iteration to the embedding archive.
+        try:
+            emb_best = embed_texts([best_code])[0]
+            canonical_embeddings.append(emb_best)
+        except Exception:
+            pass
 
         record = {
             "iteration": step,

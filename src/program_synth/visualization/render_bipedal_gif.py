@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ai_code_env import clean_generated_code, extract_python_code, validate_sandboxed_code
+from program_synth.ai_code_env import clean_generated_code, extract_python_code, validate_sandboxed_code
 
 
 _RUNNER_PY = r"""
