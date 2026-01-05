@@ -6,7 +6,7 @@ This repo runs simple black-box “program evolution” loops where an LLM propo
 
 | Bipedal (best) | Walker2d (iter_079_optimized weights) |
 | --- | --- |
-| ![best_biped.gif](best_biped.gif) | ![iter_079_optimized.gif](iter_079_optimized.gif) |
+| ![best_biped.gif](assets/best_biped.gif) | ![iter_079_optimized.gif](assets/iter_079_optimized.gif) |
 
 The policy used to render biped:
 
@@ -48,7 +48,7 @@ def main(x0: float, x1: float) -> int:
     return 1 if (x0 > 0) != (x1 > 0) else 0
 ```
 
-![XOR-boundries.png](XOR-boundries.png)
+![XOR-boundries.png](assets/XOR-boundries.png)
 
 Quickstart
 
