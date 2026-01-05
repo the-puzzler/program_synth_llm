@@ -545,8 +545,14 @@ def evaluate_policy(
         runner_path.write_text(_AGENT_RUNNER_PY, encoding="utf-8")
 
         try:
+            # Prefer project-root virtualenv Python if present, else fall back to python3.
+            here = Path(__file__).resolve()
+            repo_root = here.parents[2]
+            venv_python = repo_root / ".venv" / "bin" / "python"
+            py = str(venv_python) if venv_python.exists() else "python3"
+
             proc = subprocess.run(
-                [str(Path(__file__).resolve().parent / ".venv" / "bin" / "python"), str(runner_path)],
+                [py, str(runner_path)],
                 input=json.dumps(
                     {"user_path": str(user_path), "env_id": env_id, "seeds": seeds, "max_steps": max_steps}
                 ),

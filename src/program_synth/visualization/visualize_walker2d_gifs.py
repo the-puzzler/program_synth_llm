@@ -242,8 +242,10 @@ if __name__ == "__main__":
 
 
 def _python_for_repo() -> str:
-    venv = Path(__file__).resolve().parent / ".venv" / "bin" / "python"
-    return str(venv) if venv.exists() else "python3"
+    here = Path(__file__).resolve()
+    repo_root = here.parents[2]
+    venv_python = repo_root / ".venv" / "bin" / "python"
+    return str(venv_python) if venv_python.exists() else "python3"
 
 
 def _latest_run_dir(runs_root: Path = Path("runs")) -> Path:

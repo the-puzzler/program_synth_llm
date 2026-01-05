@@ -600,9 +600,10 @@ def evaluate_policy(
         user_path.write_text(clean_generated_code(code), encoding="utf-8")
         runner_path.write_text(_AGENT_RUNNER_PY, encoding="utf-8")
 
-        py = str(Path(__file__).resolve().parent / ".venv" / "bin" / "python")
-        if not Path(py).exists():
-            py = "python3"
+        here = Path(__file__).resolve()
+        repo_root = here.parents[2]
+        venv_python = repo_root / ".venv" / "bin" / "python"
+        py = str(venv_python) if venv_python.exists() else "python3"
 
         try:
             proc = subprocess.run(

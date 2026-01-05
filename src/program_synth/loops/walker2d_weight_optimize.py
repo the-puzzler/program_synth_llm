@@ -162,8 +162,15 @@ if __name__ == "__main__":
 
 
 def _python_for_repo() -> str:
-    venv = Path(__file__).resolve().parent / ".venv" / "bin" / "python"
-    return str(venv) if venv.exists() else "python3"
+    """
+    Prefer the project-root virtualenv Python (../.venv/bin/python relative to repo),
+    but fall back to `python3` if it is missing.
+    """
+    here = Path(__file__).resolve()
+    # repo root is two levels up from `loops/` (src/program_synth/loops)
+    repo_root = here.parents[2]
+    venv_python = repo_root / ".venv" / "bin" / "python"
+    return str(venv_python) if venv_python.exists() else "python3"
 
 
 def evaluate_policy(

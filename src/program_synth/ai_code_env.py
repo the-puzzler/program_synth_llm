@@ -318,7 +318,10 @@ if __name__ == "__main__":
         user_path.write_text(clean_generated_code(code), encoding="utf-8")
         runner_path.write_text(runner_src, encoding="utf-8")
 
-        venv_python = Path(__file__).resolve().parent / ".venv" / "bin" / "python"
+        # Prefer project-root virtualenv Python, else fall back to current interpreter.
+        here = Path(__file__).resolve()
+        repo_root = here.parents[2]
+        venv_python = repo_root / ".venv" / "bin" / "python"
         py = str(venv_python) if venv_python.exists() else sys.executable
 
         proc = subprocess.run(
@@ -423,7 +426,9 @@ if __name__ == "__main__":
         user_path.write_text(clean_generated_code(code), encoding="utf-8")
         runner_path.write_text(runner_src, encoding="utf-8")
 
-        venv_python = Path(__file__).resolve().parent / ".venv" / "bin" / "python"
+        here = Path(__file__).resolve()
+        repo_root = here.parents[2]
+        venv_python = repo_root / ".venv" / "bin" / "python"
         py = str(venv_python) if venv_python.exists() else sys.executable
 
         proc = subprocess.run(
