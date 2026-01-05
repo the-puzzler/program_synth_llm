@@ -4,9 +4,9 @@ This repo runs simple black-box “program evolution” loops where an LLM propo
 
 **Bipedal (best GIF + policy)**
 
-| Bipedal (best) | Walker2d (iter_079 optimized weights) |
+| Bipedal (best) | Walker2d (iter_079_optimized weights) |
 | --- | --- |
-| ![best_biped.gif](best_biped.gif) | ![iter_079_optimized.gif](weight optimized) |
+| ![best_biped.gif](best_biped.gif) | ![iter_079_optimized.gif](iter_079_optimized.gif) |
 
 The policy used to render biped:
 
