@@ -154,7 +154,7 @@ def _format_history_all(history: list[Attempt]) -> str:
     return "\n".join(lines)
 
 
-EMBEDDING_SIM_THRESHOLD = 0.98
+EMBEDDING_SIM_THRESHOLD = 0.99
 
 
 def _eval_policy_for_pool(args: tuple[str, str, list[int], int, float]) -> dict[str, Any]:

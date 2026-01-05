@@ -15,6 +15,7 @@ from program_synth.ai_code_env import (
     validate_sandboxed_code,
 )
 from program_synth.call_ai_utils import call_ai
+from program_synth.embedding_utils import cosine_similarity, embed_texts
 
 
 @dataclass
@@ -26,6 +27,9 @@ class Attempt:
 def _default_run_dir() -> Path:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return Path("runs") / f"xor_{ts}"
+
+
+EMBEDDING_SIM_THRESHOLD = 0.98
 
 
 def make_hidden_xor_dataset(n: int = 200, *, seed: int = 0) -> list[tuple[float, float, int]]:
@@ -135,7 +139,7 @@ def build_blackbox_prompt(*, history: list[Attempt], step: int) -> str:
         "Define exactly this function signature:\n"
         "def main(x0: float, x1: float) -> int:\n"
         "Return value requirement: `main` MUST return an integer 0 or 1 (no other values).\n"
-        "Imports: you may `import math` only.\n"
+        #"Imports: you may `import math` only.\n"
         "Do not read/write files, do not use network, do not print.\n"
         "\n"
         "Goal: maximize a scalar reward. Never return the same solution as one in history.\n"
@@ -150,7 +154,8 @@ def main() -> None:
     dataset = make_hidden_xor_dataset(n=400, seed=0)
 
     history: list[Attempt] = []
-    iterations = 20
+    history_embeddings: list[list[float]] = []
+    iterations = 60
     run_dir = _default_run_dir()
     run_dir.mkdir(parents=True, exist_ok=True)
     attempts_path = run_dir / "attempts.jsonl"
@@ -177,23 +182,52 @@ def main() -> None:
         encoding="utf-8",
     )
 
+    max_similarity_retries = 2
+
     for step in range(1, iterations + 1):
-        prompt = build_blackbox_prompt(history=history, step=step)
-        response = call_ai(prompt, concurrent_calls=1, temperature=1)[0]
-        with responses_path.open("a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "iteration": step,
-                        "prompt": prompt,
-                        "request": {"concurrent_calls": 1, "temperature": 1},
-                        "response": _jsonable(response),
-                    }
-                )
-                + "\n"
-            )
-        content = response.choices[0].message.content
-        code = clean_generated_code(extract_python_code(content))
+        attempts_raw: list[dict[str, Any]] = []
+        accepted: dict[str, Any] | None = None
+
+        for retry in range(max_similarity_retries + 1):
+            prompt = build_blackbox_prompt(history=history, step=step)
+            response = call_ai(prompt, concurrent_calls=1, temperature=1)[0]
+            content = response.choices[0].message.content
+            code = clean_generated_code(extract_python_code(content))
+
+            max_sim: float | None = None
+            try:
+                emb = embed_texts([code])[0]
+                if history_embeddings:
+                    max_sim = max(cosine_similarity(emb, prev) for prev in history_embeddings)
+                else:
+                    max_sim = 0.0
+            except Exception:
+                emb = None
+                max_sim = None
+
+            record = {
+                "prompt": prompt,
+                "response": response,
+                "code": code,
+                "embedding": emb,
+                "max_cosine": max_sim,
+            }
+            attempts_raw.append(record)
+
+            if max_sim is None or max_sim <= EMBEDDING_SIM_THRESHOLD:
+                accepted = record
+                break
+
+        if accepted is None:
+            viable = [r for r in attempts_raw if isinstance(r.get("max_cosine"), (int, float))]
+            if viable:
+                accepted = min(viable, key=lambda r: float(r["max_cosine"]))
+            else:
+                accepted = attempts_raw[0]
+
+        prompt = accepted["prompt"]
+        response = accepted["response"]
+        code = accepted["code"]
 
         error: str | None = None
         reward = 0.0
@@ -219,6 +253,11 @@ def main() -> None:
             error = str(e)
 
         history.append(Attempt(reward=reward, code=code))
+        try:
+            emb_final = embed_texts([code])[0]
+            history_embeddings.append(emb_final)
+        except Exception:
+            pass
         best = max(a.reward for a in history)
         payload = {"iteration": step, "reward": reward, "best": best}
         if error:

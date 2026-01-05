@@ -16,6 +16,7 @@ from typing import Any
 
 from program_synth.ai_code_env import clean_generated_code, extract_python_code, validate_sandboxed_code
 from program_synth.call_ai_utils import call_ai
+from program_synth.embedding_utils import cosine_similarity, embed_texts
 
 
 @dataclass
@@ -30,6 +31,9 @@ class Attempt:
 def _default_run_dir() -> Path:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return Path("runs") / f"walker2d_{ts}"
+
+
+EMBEDDING_SIM_THRESHOLD = 0.98
 
 def _load_run_meta(run_dir: Path) -> dict[str, Any] | None:
     path = run_dir / "meta.json"
@@ -634,14 +638,66 @@ def main() -> None:
             encoding="utf-8",
         )
 
+    # Embedding archive of canonical best programs (one per iteration).
+    canonical_embeddings: list[list[float]] = []
+    if history:
+        try:
+            canonical_embeddings = embed_texts([a.code for a in history])
+        except Exception:
+            canonical_embeddings = []
+
+    max_similarity_retries = 2
+
     for step in range(start_step, start_step + iterations):
-        prompts = [build_walker2d_prompt(history=history, seed=(step * 10_000 + i)) for i in range(args.concurrent)]
+        # For each concurrent slot, sample up to (max_similarity_retries + 1)
+        # candidates, accepting only those whose embedding similarity to the
+        # canonical archive is <= EMBEDDING_SIM_THRESHOLD. If none qualify for
+        # a slot, we fall back to the least-similar attempt for that slot.
+        candidates: list[dict[str, Any]] = []
 
-        def _one_prompt(pr: str):
-            return call_ai(pr, concurrent_calls=1, temperature=args.temperature)[0]
+        for idx in range(args.concurrent):
+            slot_attempts: list[dict[str, Any]] = []
+            accepted_for_slot: dict[str, Any] | None = None
 
-        with ThreadPoolExecutor(max_workers=args.concurrent) as executor:
-            responses = [f.result() for f in [executor.submit(_one_prompt, pr) for pr in prompts]]
+            for retry in range(max_similarity_retries + 1):
+                prompt = build_walker2d_prompt(history=history, seed=(step * 10_000 + idx * 100 + retry))
+                response = call_ai(prompt, concurrent_calls=1, temperature=args.temperature)[0]
+                content = response.choices[0].message.content
+                code = clean_generated_code(extract_python_code(content))
+
+                max_sim: float | None = None
+                try:
+                    emb = embed_texts([code])[0]
+                    if canonical_embeddings:
+                        max_sim = max(cosine_similarity(emb, prev) for prev in canonical_embeddings)
+                    else:
+                        max_sim = 0.0
+                except Exception:
+                    emb = None
+                    max_sim = None
+
+                attempt = {
+                    "index": idx,
+                    "prompt": prompt,
+                    "response": response,
+                    "code": code,
+                    "embedding": emb,
+                    "max_cosine": max_sim,
+                }
+                slot_attempts.append(attempt)
+
+                if max_sim is None or max_sim <= EMBEDDING_SIM_THRESHOLD:
+                    accepted_for_slot = attempt
+                    break
+
+            if accepted_for_slot is None:
+                viable = [a for a in slot_attempts if isinstance(a.get("max_cosine"), (int, float))]
+                if viable:
+                    accepted_for_slot = min(viable, key=lambda a: float(a["max_cosine"]))
+                else:
+                    accepted_for_slot = slot_attempts[0]
+
+            candidates.append(accepted_for_slot)
 
         best_code: str | None = None
         best_idx: int | None = None
@@ -649,10 +705,11 @@ def main() -> None:
         best_score_a = float("-inf")
         best_score_b = float("-inf")
 
-        for idx, response in enumerate(responses):
-            prompt = prompts[idx]
-            content = response.choices[0].message.content
-            code = clean_generated_code(extract_python_code(content))
+        for cand in candidates:
+            idx = int(cand["index"])
+            prompt = cand["prompt"]
+            response = cand["response"]
+            code = cand["code"]
 
             error: str | None = None
             step_errors: int | None = None
@@ -712,6 +769,7 @@ def main() -> None:
                 "prompt": prompt,
                 "response": _jsonable(response.raw),
                 "code": code,
+                "embedding_max_cosine": cand.get("max_cosine"),
             }
             with candidates_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(cand_record) + "\n")
@@ -731,6 +789,7 @@ def main() -> None:
                     "error": error,
                     "comment": comment,
                     "similarity": similarity,
+                    "embedding_max_cosine": cand.get("max_cosine"),
                 }
 
             try:
@@ -753,6 +812,13 @@ def main() -> None:
                 comment=(best_detail or {}).get("comment") if isinstance(best_detail, dict) else None,
             )
         )
+
+        # Update canonical embedding archive with the new best program.
+        try:
+            emb_best = embed_texts([best_code])[0]
+            canonical_embeddings.append(emb_best)
+        except Exception:
+            pass
 
         record = {
             "iteration": step,

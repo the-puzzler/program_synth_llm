@@ -71,23 +71,11 @@ Black-box experiment (BipedalWalker)
 - Iteratively asks the model for a policy `main(obs: list[float]) -> list[float]` (4-dim action) and scores average episode return:
   - Install env deps: `uv add "gymnasium[box2d]"` (or otherwise install Gymnasium + Box2D)
   - Run: `PYTHONPATH=src uv run python -m program_synth.loops.bipedal_fitness_loop`
-  - Render GIFs (per-iteration) after a run:
-    - `PYTHONPATH=src uv run python -m program_synth.visualization.visualize_bipedal_gifs` (defaults to latest `runs/bipedal_*`)
-    - Collage (sequential) GIF: `PYTHONPATH=src uv run python -m program_synth.visualization.visualize_bipedal_gifs --collage --collage-limit 16`
+  - Render per-iteration videos (MP4) after a run:
+    - `PYTHONPATH=src uv run python -m program_synth.visualization.visualize_bipedal_gifs` (defaults to latest `runs/bipedal_*`, writes `videos/iter_XXX.mp4`)
+    - Collage (sequential) video: `PYTHONPATH=src uv run python -m program_synth.visualization.visualize_bipedal_gifs --collage --collage-limit 16` (writes `videos/collage.mp4`)
   - Render a one-off GIF from a specific policy:
     - `PYTHONPATH=src uv run python -m program_synth.visualization.render_bipedal_gif --code-path policy.py`
-
-NEAT-inspired experiment (BipedalWalker) (currently not effective/working)
-
-- A population-based loop with selection, crossover, and speciation (fitness sharing):
-  - Run: `PYTHONPATH=src uv run python -m program_synth.loops.neat_bipedal_fitness_loop`
-  - Resume: `PYTHONPATH=src uv run python -m program_synth.loops.neat_bipedal_fitness_loop --checkpoint-path runs/neat_bipedal_YYYYMMDDTHHMMSSZ`
-
-Black-box experiment (Atari Pong)
-
-- Iteratively asks the model for a policy `main(obs: list[float]) -> int` and scores average episode return:
-  - Install env deps: `uv add "gymnasium[atari,accept-rom-license]"`
-  - Run: `PYTHONPATH=src uv run python -m program_synth.loops.pong_fitness_loop`
 
 Black-box experiment (MuJoCo Walker2d)
 
@@ -103,6 +91,5 @@ Black-box experiment (MuJoCo Walker2d)
 ## How It Works (Very Briefly)
 
 - The LLM outputs a single Python function `main(...)` that defines an agent/program.
-- We run that code in a sandbox and score it (XOR accuracy, or Bipedal distance/speed).
+- We run that code in a sandbox and score it (XOR accuracy, or Bipedal/Walker2d distance/speed).
 - We keep a history of attempts and feed a small slice back into the prompt to bias the next proposal.
-- In the NEAT-style variant, we keep a population, select survivors/elites, create new programs via mutation/crossover prompts, and use a simple AST-based distance to form species and apply fitness sharing.
