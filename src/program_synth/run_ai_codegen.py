@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 
-from ai_code_env import (
+from program_synth.ai_code_env import (
     FunctionSpec,
     build_code_only_prompt,
     extract_python_code,
     run_code_main,
     validate_generated_code,
 )
-from call_ai_utils import call_ai
+from program_synth.call_ai_utils import call_ai
 
 
 def main() -> None:
@@ -27,4 +27,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

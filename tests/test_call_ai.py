@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pprint import pprint
 
-from call_ai_utils import call_ai
+from program_synth.call_ai_utils import call_ai
 
 
 def _extract_text(response) -> str:
@@ -32,4 +32,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

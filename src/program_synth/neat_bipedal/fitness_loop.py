@@ -11,10 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ai_code_env import clean_generated_code, extract_python_code, validate_sandboxed_code
-from bipedal_fitness_loop import evaluate_policy
-from call_ai_utils import call_ai
-from neat_bipedal.config import DEFAULT_CONFIG, NeatBipedalConfig
+from program_synth.ai_code_env import clean_generated_code, extract_python_code, validate_sandboxed_code
+from program_synth.loops.bipedal_fitness_loop import evaluate_policy
+from program_synth.call_ai_utils import call_ai
+from program_synth.neat_bipedal.config import DEFAULT_CONFIG, NeatBipedalConfig
 
 
 @dataclass

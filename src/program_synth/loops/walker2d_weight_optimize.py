@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ai_code_env import clean_generated_code, validate_sandboxed_code
+from program_synth.ai_code_env import clean_generated_code, validate_sandboxed_code
 
 
 _AGENT_RUNNER_PY = r"""

@@ -8,13 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ai_code_env import (
+from program_synth.ai_code_env import (
     clean_generated_code,
     extract_python_code,
     run_code_main_batch,
     validate_sandboxed_code,
 )
-from call_ai_utils import call_ai
+from program_synth.call_ai_utils import call_ai
 
 
 @dataclass
