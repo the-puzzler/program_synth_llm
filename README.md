@@ -93,3 +93,4 @@ Black-box experiment (MuJoCo Walker2d)
 - The LLM outputs a single Python function `main(...)` that defines an agent/program.
 - We run that code in a sandbox and score it (XOR accuracy, or Bipedal/Walker2d distance/speed).
 - We keep a history of attempts and feed a small slice back into the prompt to bias the next proposal.
+- For more details please see the [X post](https://x.com/MozarellaPesto/status/2002493345265021086?s=20).
