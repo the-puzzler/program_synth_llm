@@ -17,6 +17,7 @@ from typing import Any
 from program_synth.ai_code_env import clean_generated_code, extract_python_code, validate_sandboxed_code
 from program_synth.call_ai_utils import call_ai
 from program_synth.embedding_utils import cosine_similarity, embed_texts
+from program_synth.utils import jsonable
 
 
 @dataclass
@@ -112,28 +113,6 @@ def _max_existing_iter(run_dir: Path) -> int:
     return best
 
 
-def _jsonable(obj: Any) -> Any:
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-    if isinstance(obj, (list, tuple)):
-        return [_jsonable(x) for x in obj]
-    if isinstance(obj, dict):
-        return {str(k): _jsonable(v) for k, v in obj.items()}
-    dump = getattr(obj, "model_dump", None)
-    if callable(dump):
-        try:
-            return _jsonable(dump())
-        except Exception:
-            pass
-    asdict = getattr(obj, "__dict__", None)
-    if isinstance(asdict, dict):
-        try:
-            return _jsonable(asdict)
-        except Exception:
-            pass
-    return repr(obj)
-
-
 def _validate_main_exists(code: str) -> None:
     tree = ast.parse(code)
     for node in tree.body:
@@ -142,16 +121,6 @@ def _validate_main_exists(code: str) -> None:
                 raise ValueError("`main` must take exactly 1 positional arg: `obs`.")
             return
     raise ValueError("Generated code must define a `main(obs)` function.")
-
-
-def _format_history_all(history: list[Attempt]) -> str:
-    if not history:
-        return "No prior attempts.\n"
-    lines: list[str] = []
-    for i, a in enumerate(history, start=1):
-        snippet = "\n".join(a.code.strip().splitlines()[:12])
-        lines.append(f"Attempt {i}: reward={a.reward:.4f}\n{snippet}\n")
-    return "\n".join(lines)
 
 
 EMBEDDING_SIM_THRESHOLD = 0.99
@@ -737,7 +706,7 @@ def main() -> None:
                 "comment": comment,
                 "similarity": similarity,
                 "prompt": prompt,
-                "response": _jsonable(cand.get("response_raw")),
+                "response": jsonable(cand.get("response_raw")),
                 "code": code,
             }
             with candidates_path.open("a", encoding="utf-8") as f:

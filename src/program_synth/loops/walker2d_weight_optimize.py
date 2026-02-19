@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from program_synth.ai_code_env import clean_generated_code, validate_sandboxed_code
+from program_synth.utils import jsonable, repo_python_from_file
 
 
 _AGENT_RUNNER_PY = r"""
@@ -161,18 +162,6 @@ if __name__ == "__main__":
 """
 
 
-def _python_for_repo() -> str:
-    """
-    Prefer the project-root virtualenv Python (../.venv/bin/python relative to repo),
-    but fall back to `python3` if it is missing.
-    """
-    here = Path(__file__).resolve()
-    # repo root is two levels up from `loops/` (src/program_synth/loops)
-    repo_root = here.parents[2]
-    venv_python = repo_root / ".venv" / "bin" / "python"
-    return str(venv_python) if venv_python.exists() else "python3"
-
-
 def evaluate_policy(
     code: str,
     *,
@@ -189,7 +178,7 @@ def evaluate_policy(
         runner_path.write_text(_AGENT_RUNNER_PY, encoding="utf-8")
 
         proc = subprocess.run(
-            [_python_for_repo(), str(runner_path)],
+            [repo_python_from_file(__file__), str(runner_path)],
             input=json.dumps({"user_path": str(user_path), "env_id": env_id, "seeds": seeds, "max_steps": max_steps}),
             text=True,
             capture_output=True,
@@ -282,28 +271,6 @@ def _apply_floats(code: str, floats: list[float]) -> str:
     ast.fix_missing_locations(new_tree)
     out = ast.unparse(new_tree).strip() + "\n"
     return clean_generated_code(out)
-
-
-def _jsonable(obj: Any) -> Any:
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-    if isinstance(obj, (list, tuple)):
-        return [_jsonable(x) for x in obj]
-    if isinstance(obj, dict):
-        return {str(k): _jsonable(v) for k, v in obj.items()}
-    dump = getattr(obj, "model_dump", None)
-    if callable(dump):
-        try:
-            return _jsonable(dump())
-        except Exception:
-            pass
-    asdict = getattr(obj, "__dict__", None)
-    if isinstance(asdict, dict):
-        try:
-            return _jsonable(asdict)
-        except Exception:
-            pass
-    return repr(obj)
 
 
 def _score_from_result(result: dict[str, Any]) -> tuple[float, float]:
@@ -483,7 +450,7 @@ def main() -> None:
             "rel_sigma": float(args.rel_sigma),
             "abs_sigma": float(args.abs_sigma),
             "clip": float(args.clip),
-            "best_result": _jsonable(best_trial.result if best_trial else None),
+            "best_result": jsonable(best_trial.result if best_trial else None),
         }
         with log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec) + "\n")

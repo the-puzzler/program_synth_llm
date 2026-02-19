@@ -43,28 +43,6 @@ def make_hidden_xor_dataset(n: int = 200, *, seed: int = 0) -> list[tuple[float,
     return data
 
 
-def _jsonable(obj: Any) -> Any:
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-    if isinstance(obj, (list, tuple)):
-        return [_jsonable(x) for x in obj]
-    if isinstance(obj, dict):
-        return {str(k): _jsonable(v) for k, v in obj.items()}
-    dump = getattr(obj, "model_dump", None)
-    if callable(dump):
-        try:
-            return _jsonable(dump())
-        except Exception:
-            pass
-    asdict = getattr(obj, "__dict__", None)
-    if isinstance(asdict, dict):
-        try:
-            return _jsonable(asdict)
-        except Exception:
-            pass
-    return repr(obj)
-
-
 def reward_accuracy(dataset: list[tuple[float, float, int]], preds: list[Any]) -> float:
     correct = 0
     for i, (_x0, _x1, y) in enumerate(dataset):

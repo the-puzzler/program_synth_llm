@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from program_synth.ai_code_env import clean_generated_code, extract_python_code, validate_sandboxed_code
+from program_synth.utils import repo_python_from_file
 
 
 _RUNNER_PY = r"""
@@ -162,13 +163,6 @@ if __name__ == "__main__":
 """
 
 
-def _python_for_repo() -> str:
-    here = Path(__file__).resolve()
-    repo_root = here.parents[2]
-    venv_python = repo_root / ".venv" / "bin" / "python"
-    return str(venv_python) if venv_python.exists() else "python3"
-
-
 def _default_out_path(run_dir: Path) -> Path:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return run_dir / f"manual_bipedal_{ts}.gif"
@@ -217,7 +211,7 @@ def main() -> None:
         runner_path.write_text(_RUNNER_PY, encoding="utf-8")
 
         proc = subprocess.run(
-            [_python_for_repo(), str(runner_path)],
+            [repo_python_from_file(__file__), str(runner_path)],
             input=json.dumps(
                 {
                     "policy_path": str(policy_path),

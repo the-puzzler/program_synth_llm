@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from program_synth.ai_code_env import clean_generated_code, validate_sandboxed_code
+from program_synth.utils import repo_python_from_file
 
 try:
     import numpy as np  # type: ignore
@@ -241,13 +242,6 @@ if __name__ == "__main__":
 """
 
 
-def _python_for_repo() -> str:
-    here = Path(__file__).resolve()
-    repo_root = here.parents[2]
-    venv_python = repo_root / ".venv" / "bin" / "python"
-    return str(venv_python) if venv_python.exists() else "python3"
-
-
 def _latest_run_dir(runs_root: Path = Path("runs")) -> Path:
     def _parse_timestamp(name: str) -> tuple[int, ...] | None:
         # Expect ..._YYYYMMDDTHHMMSSZ
@@ -398,7 +392,7 @@ def _run_one(
         runner_path.write_text(_RUNNER_PY, encoding="utf-8")
 
         proc = subprocess.run(
-            [_python_for_repo(), str(runner_path)],
+            [repo_python_from_file(__file__), str(runner_path)],
             input=json.dumps(
                 {
                     "policy_path": str(policy_path),

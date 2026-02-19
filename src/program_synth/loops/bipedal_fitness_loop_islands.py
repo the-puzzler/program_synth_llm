@@ -20,6 +20,7 @@ from program_synth.loops.bipedal_fitness_loop import (
     build_bipedal_prompt,
     evaluate_policy,
 )
+from program_synth.utils import jsonable
 
 
 @dataclass
@@ -35,28 +36,6 @@ class LineageState:
 def _default_run_dir() -> Path:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return Path("runs") / f"bipedal_islands_{ts}"
-
-
-def _jsonable(obj: Any) -> Any:
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-    if isinstance(obj, (list, tuple)):
-        return [_jsonable(x) for x in obj]
-    if isinstance(obj, dict):
-        return {str(k): _jsonable(v) for k, v in obj.items()}
-    dump = getattr(obj, "model_dump", None)
-    if callable(dump):
-        try:
-            return _jsonable(dump())
-        except Exception:
-            pass
-    asdict = getattr(obj, "__dict__", None)
-    if isinstance(asdict, dict):
-        try:
-            return _jsonable(asdict)
-        except Exception:
-            pass
-    return repr(obj)
 
 
 def _sample_candidate_for_lineage(
@@ -341,7 +320,7 @@ def main() -> None:
                 "step_errors": step_errors,
                 "error": error,
                 "prompt": prompt,
-                "response": _jsonable(response),
+                "response": jsonable(response),
                 "code": code,
                 "embedding_max_cosine": cand.get("max_cosine"),
             }

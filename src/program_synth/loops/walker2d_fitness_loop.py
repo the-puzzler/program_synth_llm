@@ -17,6 +17,7 @@ from typing import Any
 from program_synth.ai_code_env import clean_generated_code, extract_python_code, validate_sandboxed_code
 from program_synth.call_ai_utils import call_ai
 from program_synth.embedding_utils import cosine_similarity, embed_texts
+from program_synth.utils import jsonable
 
 
 @dataclass
@@ -133,28 +134,6 @@ def _max_existing_iter(run_dir: Path) -> int:
         except Exception:
             continue
     return best
-
-
-def _jsonable(obj: Any) -> Any:
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-    if isinstance(obj, (list, tuple)):
-        return [_jsonable(x) for x in obj]
-    if isinstance(obj, dict):
-        return {str(k): _jsonable(v) for k, v in obj.items()}
-    dump = getattr(obj, "model_dump", None)
-    if callable(dump):
-        try:
-            return _jsonable(dump())
-        except Exception:
-            pass
-    asdict = getattr(obj, "__dict__", None)
-    if isinstance(asdict, dict):
-        try:
-            return _jsonable(asdict)
-        except Exception:
-            pass
-    return repr(obj)
 
 
 def _validate_main_exists(code: str) -> None:
@@ -767,7 +746,7 @@ def main() -> None:
                 "comment": comment,
                 "similarity": similarity,
                 "prompt": prompt,
-                "response": _jsonable(response.raw),
+                "response": jsonable(response.raw),
                 "code": code,
                 "embedding_max_cosine": cand.get("max_cosine"),
             }

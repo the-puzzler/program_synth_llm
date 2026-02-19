@@ -21,6 +21,7 @@ from program_synth.ai_code_env import (
 )
 from program_synth.call_ai_utils import call_ai
 from program_synth.embedding_utils import cosine_similarity, embed_texts
+from program_synth.utils import jsonable
 
 
 EMBEDDING_SIM_THRESHOLD = 0.99
@@ -55,28 +56,6 @@ def _default_run_dir(env_id: str) -> Path:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     safe_env = env_id.replace("/", "_").replace("-", "_")
     return Path("runs") / f"gym_islands_{safe_env}_{ts}"
-
-
-def _jsonable(obj: Any) -> Any:
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-    if isinstance(obj, (list, tuple)):
-        return [_jsonable(x) for x in obj]
-    if isinstance(obj, dict):
-        return {str(k): _jsonable(v) for k, v in obj.items()}
-    dump = getattr(obj, "model_dump", None)
-    if callable(dump):
-        try:
-            return _jsonable(dump())
-        except Exception:
-            pass
-    asdict = getattr(obj, "__dict__", None)
-    if isinstance(asdict, dict):
-        try:
-            return _jsonable(asdict)
-        except Exception:
-            pass
-    return repr(obj)
 
 
 def _infer_gym_spec(env_id: str) -> GymTaskSpec:
@@ -729,7 +708,7 @@ def main() -> None:
                 "error": error,
                  "comment": comment,
                  "prompt": prompt,
-                 "response": _jsonable(response),
+                 "response": jsonable(response),
                  "code": code,
                  "embedding_max_cosine": cand.get("max_cosine"),
             }
