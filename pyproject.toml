@@ -13,4 +13,5 @@ dependencies = [
     "swig>=4.4.0",
     "gymnasium[accept-rom-license,atari,box2d,mujoco]>=1.2.3",
     "openai>=2.14.0",
+    "gymnasium-robotics>=1.4.2",
 ]
