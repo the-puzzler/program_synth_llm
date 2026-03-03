@@ -2,6 +2,8 @@
 
 This repo runs simple black-box “program evolution” loops where an LLM proposes small Python programs and we score them in an environment.
 
+Full report/blog post can be found here: [here](https://the-puzzler.github.io/share/optimiser-i-hardly-know-er.html)
+
 **Bipedal (best GIF + policy)**
 
 | Bipedal (best) | Walker2d (iter_079_optimized weights) |
